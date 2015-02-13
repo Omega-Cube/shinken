@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# Copyright (C) 2009-2012:
+# Copyright (C) 2009-2014:
 #    Gabes Jean, naparuba@gmail.com
 #    Gerhard Lausser, Gerhard.Lausser@consol.de
 #    Gregory Starck, g.starck@gmail.com
@@ -31,4 +31,4 @@ ETC="$DIR"/../etc
 cd "$DIR/../var"
 
 echo "Launching Arbiter (which reads configuration and dispatches it)"
-"$BIN"/shinken-arbiter -d -c "$ETC"/nagios.cfg -c "$ETC"/shinken-specific.cfg
+"$BIN"/shinken-arbiter -d -c "$ETC"/shinken.cfg

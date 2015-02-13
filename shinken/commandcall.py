@@ -1,8 +1,7 @@
 #!/usr/bin/env python
-
 # -*- coding: utf-8 -*-
 
-# Copyright (C) 2009-2012:
+# Copyright (C) 2009-2014:
 #    Gabes Jean, naparuba@gmail.com
 #    Gerhard Lausser, Gerhard.Lausser@consol.de
 #    Gregory Starck, g.starck@gmail.com
@@ -43,8 +42,8 @@ class CommandCall(DummyCommandCall):
     # running_properties names
     __metaclass__ = AutoSlots
 
-    #__slots__ = ('id', 'call', 'command', 'valid', 'args', 'poller_tag',
-    #             'reactionner_tag', 'module_type', '__dict__')
+    # __slots__ = ('id', 'call', 'command', 'valid', 'args', 'poller_tag',
+    #              'reactionner_tag', 'module_type', '__dict__')
     id = 0
     my_type = 'CommandCall'
 
@@ -56,12 +55,13 @@ class CommandCall(DummyCommandCall):
         'module_type':     StringProp(default='fork'),
         'valid':           BoolProp(default=False),
         'args':            StringProp(default=[]),
-        'timeout':         IntegerProp(default='-1'),
-        'late_relink_done':BoolProp(default=False),
+        'timeout':         IntegerProp(default=-1),
+        'late_relink_done': BoolProp(default=False),
+        'enable_environment_macros': BoolProp(default=False),
     }
 
     def __init__(self, commands, call, poller_tag='None',
-                 reactionner_tag='None'):
+                 reactionner_tag='None', enable_environment_macros=0):
         self.id = self.__class__.id
         self.__class__.id += 1
         self.call = call
@@ -80,6 +80,7 @@ class CommandCall(DummyCommandCall):
             self.poller_tag = poller_tag  # from host/service
             self.reactionner_tag = reactionner_tag
             self.module_type = self.command.module_type
+            self.enable_environment_macros = self.command.enable_environment_macros
             self.timeout = int(self.command.timeout)
             if self.valid and poller_tag is 'None':
                 # from command if not set

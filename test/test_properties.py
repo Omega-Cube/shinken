@@ -1,5 +1,4 @@
-#!/usr/bin/env python
-# Copyright (C) 2009-2012:
+# Copyright (C) 2009-2014:
 #    Gabes Jean, naparuba@gmail.com
 #    Gerhard Lausser, Gerhard.Lausser@consol.de
 #    Hartmut Goebel, h.goebel@goebel-consult.de
@@ -23,13 +22,14 @@
 Test shinken.property
 """
 
-import unittest
 
 import __import_shinken
-import shinken.property
+
+import shinken
 from shinken.property import none_object
 
-from shinken_test import *
+from shinken_test import ShinkenTest, unittest
+
 
 
 class PropertyTests:
@@ -62,9 +62,9 @@ class PropertyTests:
         self.assertFalse(p.unused)
 
 
-#ShinkenTest, unittest.TestCase
+#ShinkenTest
 
-class TestBoolProp(PropertyTests, ShinkenTest, unittest.TestCase):
+class TestBoolProp(PropertyTests, ShinkenTest):
     """Test the BoolProp class"""
 
     prop_class = shinken.property.BoolProp
@@ -76,14 +76,17 @@ class TestBoolProp(PropertyTests, ShinkenTest, unittest.TestCase):
         self.assertEqual(p.pythonize("yes"), True)
         self.assertEqual(p.pythonize("true"), True)
         self.assertEqual(p.pythonize("on"), True)
+        self.assertEqual(p.pythonize(["off", "on"]), True)
         # allowed strings for `False`
         self.assertEqual(p.pythonize("0"), False)
         self.assertEqual(p.pythonize("no"), False)
         self.assertEqual(p.pythonize("false"), False)
         self.assertEqual(p.pythonize("off"), False)
+        self.assertEqual(p.pythonize(["on", "off"]), False)
 
 
-class TestIntegerProp(PropertyTests, ShinkenTest, unittest.TestCase):
+
+class TestIntegerProp(PropertyTests, ShinkenTest):
     """Test the IntegerProp class"""
 
     prop_class = shinken.property.IntegerProp
@@ -93,9 +96,10 @@ class TestIntegerProp(PropertyTests, ShinkenTest, unittest.TestCase):
         self.assertEqual(p.pythonize("1"), 1)
         self.assertEqual(p.pythonize("0"), 0)
         self.assertEqual(p.pythonize("1000.33"), 1000)
+        self.assertEqual(p.pythonize(["2000.66", "1000.33"]), 1000)
 
 
-class TestFloatProp(PropertyTests, ShinkenTest, unittest.TestCase):
+class TestFloatProp(PropertyTests, ShinkenTest):
     """Test the FloatProp class"""
 
     prop_class = shinken.property.FloatProp
@@ -105,9 +109,10 @@ class TestFloatProp(PropertyTests, ShinkenTest, unittest.TestCase):
         self.assertEqual(p.pythonize("1"), 1.0)
         self.assertEqual(p.pythonize("0"), 0.0)
         self.assertEqual(p.pythonize("1000.33"), 1000.33)
+        self.assertEqual(p.pythonize(["2000.66", "1000.33"]), 1000.33)
 
 
-class TestStringProp(PropertyTests, ShinkenTest, unittest.TestCase):
+class TestStringProp(PropertyTests, ShinkenTest):
     """Test the StringProp class"""
 
     prop_class = shinken.property.StringProp
@@ -118,9 +123,10 @@ class TestStringProp(PropertyTests, ShinkenTest, unittest.TestCase):
         self.assertEqual(p.pythonize("yes"), "yes")
         self.assertEqual(p.pythonize("0"), "0")
         self.assertEqual(p.pythonize("no"), "no")
+        self.assertEqual(p.pythonize(["yes", "no"]), "no")
 
 
-class TestCharProp(PropertyTests, ShinkenTest, unittest.TestCase):
+class TestCharProp(PropertyTests, ShinkenTest):
     """Test the CharProp class"""
 
     prop_class = shinken.property.CharProp
@@ -129,6 +135,7 @@ class TestCharProp(PropertyTests, ShinkenTest, unittest.TestCase):
         p = self.prop_class()
         self.assertEqual(p.pythonize("c"), "c")
         self.assertEqual(p.pythonize("cxxxx"), "c")
+        self.assertEqual(p.pythonize(["bxxxx", "cxxxx"]), "c")
         # this raises IndexError. is this intented?
         ## self.assertEqual(p.pythonize(""), "")
 
@@ -151,7 +158,7 @@ class TestConfigPathProp(TestStringProp):
     # any relevant change. So no further tests are implemented here.
 
 
-class TestListProp(PropertyTests, ShinkenTest, unittest.TestCase):
+class TestListProp(PropertyTests, ShinkenTest):
     """Test the ListProp class"""
 
     prop_class = shinken.property.ListProp
@@ -160,9 +167,19 @@ class TestListProp(PropertyTests, ShinkenTest, unittest.TestCase):
         p = self.prop_class()
         self.assertEqual(p.pythonize(""), [])
         self.assertEqual(p.pythonize("1,2,3"), ["1", "2", "3"])
+        # Default is to split on coma for list also.
+        self.assertEquals(p.pythonize(["1,2,3", "4,5,6"]), ["1","2","3", "4","5","6"])
+
+    def test_pythonize_nosplit(self):
+        p = self.prop_class(split_on_coma=False)
+        self.assertEqual(p.pythonize(""), [""])
+        self.assertEqual(p.pythonize("1,2,3"), ["1,2,3"])
+        # Default is to split on coma for list also.
+        self.assertEquals(p.pythonize(["1,2,3", "4,5,6"]), ["1,2,3", "4,5,6"])
 
 
-class TestLogLevelProp(PropertyTests, ShinkenTest, unittest.TestCase):
+
+class TestLogLevelProp(PropertyTests, ShinkenTest):
     """Test the LogLevelProp class"""
 
     prop_class = shinken.property.LogLevelProp
@@ -178,10 +195,11 @@ class TestLogLevelProp(PropertyTests, ShinkenTest, unittest.TestCase):
         ## 'FATAL' is not defined in std-module `logging._levelNames`
         #self.assertEqual(p.pythonize("FATAL"), 50)
         self.assertEqual(p.pythonize("CRITICAL"), 50)
+        self.assertEqual(p.pythonize(["NOTSET", "CRITICAL"]), 50)
 
 
 ## :todo: fix DictProp error if no `elts_prop` are passed
-## class TestDictProp(PropertyTests, ShinkenTest, unittest.TestCase):
+## class TestDictProp(PropertyTests, ShinkenTest):
 ##     """Test the DictProp class"""
 ##
 ##     prop_class = shinken.property.DictProp
@@ -191,7 +209,7 @@ class TestLogLevelProp(PropertyTests, ShinkenTest, unittest.TestCase):
 ##         self.assertEqual(p.pythonize(""), "")
 
 
-class TestAddrProp(PropertyTests, ShinkenTest, unittest.TestCase):
+class TestAddrProp(PropertyTests, ShinkenTest):
     """Test the AddrProp class"""
 
     prop_class = shinken.property.AddrProp
@@ -227,6 +245,9 @@ class TestAddrProp(PropertyTests, ShinkenTest, unittest.TestCase):
         self.assertRaises(ValueError, p.pythonize, ":")
         # no address, only port number
         self.assertEqual(p.pythonize(":445"),
+                         {'address': "",
+                          'port': 445})
+        self.assertEqual(p.pythonize([":444", ":445"]),
                          {'address': "",
                           'port': 445})
 

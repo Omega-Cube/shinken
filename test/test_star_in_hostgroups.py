@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (C) 2009-2010:
+# Copyright (C) 2009-2014:
 #    Gabes Jean, naparuba@gmail.com
 #    Gerhard Lausser, Gerhard.Lausser@consol.de
 #
@@ -27,7 +27,7 @@ from shinken_test import *
 
 class TestStarInGroups(ShinkenTest):
     def setUp(self):
-        self.setup_with_file('etc/nagios_star_in_hostgroups.cfg')
+        self.setup_with_file('etc/shinken_star_in_hostgroups.cfg')
 
     # If we reach a good start, we are ok :)
     # the bug was that an * hostgroup expand get all host_name != ''
@@ -46,10 +46,10 @@ class TestStarInGroups(ShinkenTest):
         router.checks_in_progress = []
         router.act_depend_of = []  # ignore the router
         svc = self.sched.services.find_srv_by_name_and_hostname("test_host_0", "TEST")
-        self.assert_(svc is not None)
+        self.assertIsNot(svc, None)
 
         svc = self.sched.services.find_srv_by_name_and_hostname("test_host_0", "TEST_HNAME_STAR")
-        self.assert_(svc is not None)
+        self.assertIsNot(svc, None)
 
 
 if __name__ == '__main__':

@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (C) 2009-2010:
+# Copyright (C) 2009-2014:
 #    Gabes Jean, naparuba@gmail.com
 #    Gerhard Lausser, Gerhard.Lausser@consol.de
 #
@@ -27,14 +27,14 @@ from shinken_test import *
 
 class TestConfig(ShinkenTest):
     def setUp(self):
-        self.setup_with_file('etc/nagios_broken_1.cfg')
+        self.setup_with_file('etc/shinken_broken_1.cfg')
 
     def test_conf_is_correct(self):
         #
         # Config is not correct because of a wrong relative path
         # in the main config file
         #
-        self.assert_(not self.conf.conf_is_correct)
+        self.assertFalse(self.conf.conf_is_correct)
         #self.show_logs()
 
 

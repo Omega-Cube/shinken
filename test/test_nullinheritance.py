@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (C) 2009-2010:
+# Copyright (C) 2009-2014:
 #    Gabes Jean, naparuba@gmail.com
 #    Gerhard Lausser, Gerhard.Lausser@consol.de
 #
@@ -27,13 +27,13 @@ from shinken_test import *
 
 class TestNullInheritance(ShinkenTest):
     def setUp(self):
-        self.setup_with_file('etc/nagios_nullinheritance.cfg')
+        self.setup_with_file('etc/shinken_nullinheritance.cfg')
 
     # We search to see if null as value really delete the inheritance
     # of a property
     def test_null_inheritance(self):
         svc = self.sched.services.find_srv_by_name_and_hostname("test_host_0", "test_ok_0")
-        self.assert_(svc.icon_image == '')
+        self.assertEqual('', svc.icon_image)
 
 
 if __name__ == '__main__':

@@ -3,10 +3,12 @@
 *.egg-info
 build
 dist
+INSTALLED_FILES
 .project
 .pydevproject
 .settings
 .gitignore
+modules/*
 
 # Logs and databases #
 ######################
@@ -17,9 +19,26 @@ dist
 
 # OS generated files #
 ######################
+*.pyc
 *.DS_Store*
 ehthumbs.db
 Icon?
 Thumbs.db
 *.pid
 ._.*
+*~
+\#*#
+
+*.debug
+*pack_distribution.dat
+test/tmp/*dat
+
+# Documentation #
+#################
+docs/build
+docs/tools/media/
+docs/tools/pages/
+
+
+# test and coverage
+test/tmp/.cov*

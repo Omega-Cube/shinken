@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 #  -*- coding: utf-8 -*-
 #
-# Copyright (C) 2009-2010:
+# Copyright (C) 2009-2014:
 #    Gabes Jean, naparuba@gmail.com
 #    Gerhard Lausser, Gerhard.Lausser@consol.de
 #
@@ -31,16 +31,16 @@ from shinken.log import logger
 class TestConfig(ShinkenTest):
 
     def setUp(self):
-        self.setup_with_file('etc/nagios_1r_1h_1s.cfg')
+        self.setup_with_file('etc/shinken_1r_1h_1s.cfg')
 
     # Try to raise an utf8 log message
     def test_utf8log(self):
         sutf = 'h\351h\351'  # Latin Small Letter E with acute in Latin-1
-        logger.log(sutf)
+        logger.info(sutf)
         sutf8 = u'I love myself $£¤'  # dollar, pound, currency
-        logger.log(sutf8)
+        logger.info(sutf8)
         s = unichr(40960) + u'abcd' + unichr(1972)
-        logger.log(s)
+        logger.info(s)
 
 
 

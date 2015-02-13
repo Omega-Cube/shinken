@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 #
-# Copyright (C) 2009-2012:
+# Copyright (C) 2009-2014:
 #    Gabes Jean, naparuba@gmail.com
 #    Gerhard Lausser, Gerhard.Lausser@consol.de
 #    Gregory Starck, g.starck@gmail.com
@@ -27,6 +27,7 @@ import time
 import shlex
 import sys
 import subprocess
+import signal
 
 # Try to read in non-blocking mode, from now this only from now on
 # Unix systems
@@ -35,10 +36,9 @@ try:
 except ImportError:
     fcntl = None
 
-from shinken.util import safe_print
 from shinken.log import logger
 
-__all__ = ('Action')
+__all__ = ('Action', )
 
 valid_exit_status = (0, 1, 2, 3)
 
@@ -56,7 +56,7 @@ def no_block_read(output):
     fcntl.fcntl(fd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
     try:
         return output.read()
-    except:
+    except Exception:
         return ''
 
 
@@ -102,6 +102,7 @@ class __Action(object):
             local_env[p] = self.env[p].encode('utf8')
         return local_env
 
+
     def execute(self):
         """
         Start this action command. The command will be executed in a
@@ -120,23 +121,25 @@ class __Action(object):
         self.stdoutdata = ''
         self.stderrdata = ''
 
-        return self.execute__()  ## OS specific part
+        return self.execute__()  # OS specific part
+
 
     def get_outputs(self, out, max_plugins_output_length):
-        #print "Get only," , max_plugins_output_length, "bytes"
         # Squeeze all output after max_plugins_output_length
         out = out[:max_plugins_output_length]
+        # manage escaped pipes
+        out = out.replace('\|', '___PROTECT_PIPE___')
         # Then cuts by lines
         elts = out.split('\n')
         # For perf data
         elts_line1 = elts[0].split('|')
         # First line before | is output, and strip it
-        self.output = elts_line1[0].strip()
+        self.output = elts_line1[0].strip().replace('___PROTECT_PIPE___', '|')
         # Init perfdata as void
         self.perf_data = ''
         # After | is perfdata, and strip it
         if len(elts_line1) > 1:
-            self.perf_data = elts_line1[1].strip()
+            self.perf_data = elts_line1[1].strip().replace('___PROTECT_PIPE___', '|')
         # Now manage others lines. Before the | it's long_output
         # And after it's all perf_data, \n join
         long_output = []
@@ -144,14 +147,14 @@ class __Action(object):
         for line in elts[1:]:
             # if already in perfdata, direct append
             if in_perfdata:
-                self.perf_data += ' ' + line.strip()
+                self.perf_data += ' ' + line.strip().replace('___PROTECT_PIPE___', '|')
             else:  # not already in? search for the | part :)
                 elts = line.split('|', 1)
                 # The first part will always be long_output
-                long_output.append(elts[0].strip())
+                long_output.append(elts[0].strip().replace('___PROTECT_PIPE___', '|'))
                 if len(elts) > 1:
                     in_perfdata = True
-                    self.perf_data += ' ' + elts[1].strip()
+                    self.perf_data += ' ' + elts[1].strip().replace('___PROTECT_PIPE___', '|')
         # long_output is all non output and perfline, join with \n
         self.long_output = '\n'.join(long_output)
 
@@ -166,7 +169,6 @@ class __Action(object):
         _, _, child_utime, child_stime, _ = os.times()
         if self.process.poll() is None:
             self.wait_time = min(self.wait_time * 2, 0.1)
-            #time.sleep(wait_time)
             now = time.time()
 
             # If the fcntl is available (unix) we try to read in a
@@ -179,8 +181,6 @@ class __Action(object):
 
             if (now - self.check_time) > self.timeout:
                 self.kill__()
-                #print "Kill for timeout", self.process.pid,
-                #print self.command, now - self.check_time
                 self.status = 'timeout'
                 self.execution_time = now - self.check_time
                 self.exit_status = 3
@@ -209,21 +209,24 @@ class __Action(object):
         # we should not keep the process now
         del self.process
 
-        # if the exit status is abnormal, we add stderr to the output
-        # TODO: Abnormal should be logged properly no?
-        if self.exit_status not in valid_exit_status:
-            self.stdoutdata = self.stdoutdata + self.stderrdata
-        elif ('sh: -c: line 0: unexpected EOF while looking for matching'
-              in self.stderrdata
-              or ('sh: -c:' in self.stderrdata and ': Syntax' in self.stderrdata)
-              or 'sh: Syntax error: Unterminated quoted string'
-              in self.stderrdata):
+        if (  # check for bad syntax in command line:
+            'sh: -c: line 0: unexpected EOF while looking for matching' in self.stderrdata
+            or ('sh: -c:' in self.stderrdata and ': Syntax' in self.stderrdata)
+            or 'Syntax error: Unterminated quoted string' in self.stderrdata
+        ):
             # Very, very ugly. But subprocess._handle_exitstatus does
             # not see a difference between a regular "exit 1" and a
             # bailing out shell. Strange, because strace clearly shows
             # a difference. (exit_group(1) vs. exit_group(257))
             self.stdoutdata = self.stdoutdata + self.stderrdata
             self.exit_status = 3
+
+        if self.exit_status not in valid_exit_status:
+            self.exit_status = 3
+
+        if not self.stdoutdata.strip():
+            self.stdoutdata = self.stderrdata
+
         # Now grep what we want in the output
         self.get_outputs(self.stdoutdata, max_plugins_output_length)
 
@@ -256,10 +259,10 @@ class __Action(object):
         return False
 
 
-###
-### OS specific "execute__" & "kill__" are defined by "Action" class
-### definition:
-###
+#
+# OS specific "execute__" & "kill__" are defined by "Action" class
+# definition:
+#
 
 if os.name != 'nt':
 
@@ -289,10 +292,8 @@ if os.name != 'nt':
                     return
 
 
-            #safe_print("Launching", cmd)
-            #safe_print("With env", self.local_env)
-
             # Now: GO for launch!
+            # logger.debug("Launching: %s" % (self.command.encode('utf8', 'ignore')))
 
             # The preexec_fn=os.setsid is set to give sons a same
             # process group. See
@@ -304,11 +305,11 @@ if os.name != 'nt':
                     close_fds=True, shell=force_shell, env=self.local_env,
                     preexec_fn=os.setsid)
             except OSError, exp:
-                logger.error("Fail launching command: %s %s %s"
-                             % (self.command, exp, force_shell))
+                logger.error("Fail launching command: %s %s %s",
+                             self.command, exp, force_shell)
                 # Maybe it's just a shell we try to exec. So we must retry
                 if (not force_shell and exp.errno == 8
-                    and exp.strerror == 'Exec format error'):
+                   and exp.strerror == 'Exec format error'):
                     return self.execute__(True)
                 self.output = exp.__str__()
                 self.exit_status = 2
@@ -323,7 +324,14 @@ if os.name != 'nt':
             # We kill a process group because we launched them with
             # preexec_fn=os.setsid and so we can launch a whole kill
             # tree instead of just the first one
-            os.killpg(self.process.pid, 9)
+            os.killpg(self.process.pid, signal.SIGKILL)
+            # Try to force close the descriptors, because python seems to have problems with them
+            for fd in [self.process.stdout, self.process.stderr]:
+                try:
+                    fd.close()
+                except Exception:
+                    pass
+
 
 else:
 
@@ -353,7 +361,7 @@ else:
                     cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                     env=self.local_env, shell=True)
             except WindowsError, exp:
-                logger.info("We kill the process: %s %s" % (exp, self.command))
+                logger.info("We kill the process: %s %s", exp, self.command)
                 self.status = 'timeout'
                 self.execution_time = time.time() - self.check_time
 

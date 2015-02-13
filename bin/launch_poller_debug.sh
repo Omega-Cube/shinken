@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# Copyright (C) 2009-2012:
+# Copyright (C) 2009-2014:
 #    Gabes Jean, naparuba@gmail.com
 #    Gerhard Lausser, Gerhard.Lausser@consol.de
 #    Gregory Starck, g.starck@gmail.com
@@ -28,4 +28,4 @@ ETC="$DIR"/../etc
 DEBUG_PATH="/tmp/poller.debug"
 
 echo "Launching Poller (which launches checks) in debug mode to the file $DEBUG_PATH"
-"$BIN"/shinken-poller -d -c "$ETC"/pollerd.ini --debug "$DEBUG_PATH"
+"$BIN"/shinken-poller -d -c "$ETC"/daemons/pollerd.ini --debug "$DEBUG_PATH" --profile /tmp/poller.profile

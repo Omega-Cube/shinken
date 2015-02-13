@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (C) 2009-2010:
+# Copyright (C) 2009-2014:
 #    Gabes Jean, naparuba@gmail.com
 #    Gerhard Lausser, Gerhard.Lausser@consol.de
 #
@@ -45,7 +45,7 @@ class TestAcks(ShinkenTest):
         self.scheduler_loop(1, [[host, 0, 'UP']])
         print "- 1 x OK -------------------------------------"
         self.scheduler_loop(1, [[svc, 0, 'OK']])
-        self.assert_(svc.current_notification_number == 0)
+        self.assertEqual(0, svc.current_notification_number)
 
         #--------------------------------------------------------------
         # first check the normal behavior
@@ -55,9 +55,9 @@ class TestAcks(ShinkenTest):
         #--------------------------------------------------------------
         print "- 2 x BAD get hard -------------------------------------"
         self.scheduler_loop(2, [[svc, 2, 'BAD']])
-        self.assert_(svc.current_notification_number == 1)
-        self.assert_(self.count_actions() == 3)
-        self.assert_(self.log_match(5, 'SERVICE NOTIFICATION'))
+        self.assertEqual(1, svc.current_notification_number)
+        self.assertEqual(3, self.count_actions())
+        self.assert_log_match(5, 'SERVICE NOTIFICATION')
         self.show_and_clear_logs()
         self.show_and_clear_actions()
         # clean up
@@ -71,23 +71,24 @@ class TestAcks(ShinkenTest):
         #--------------------------------------------------------------
         print "- 1 x BAD get soft -------------------------------------"
         self.scheduler_loop(1, [[svc, 2, 'BAD']])
-        self.assert_(svc.current_notification_number == 0)
+        self.assertEqual(0, svc.current_notification_number)
 
         #--------------------------------------------------------------
         # someone acknowledges the problem before a notification goes out
         #--------------------------------------------------------------
-        self.assert_(not svc.problem_has_been_acknowledged)
+        self.assertFalse(svc.problem_has_been_acknowledged)
         now = time.time()
         cmd = "[%lu] ACKNOWLEDGE_SVC_PROBLEM;test_host_0;test_ok_0;1;1;0;lausser;blablub" % now
         self.sched.run_external_command(cmd)
-        self.sched.get_new_actions()
-        self.worker_loop()
-        self.assert_(svc.problem_has_been_acknowledged)
-        self.assert_(self.log_match(3, 'ACKNOWLEDGEMENT \(CRITICAL\)'))
+        self.scheduler_loop(1, [], do_sleep=False)
+        #self.sched.get_new_actions()
+        #self.worker_loop()
+        self.assertTrue(svc.problem_has_been_acknowledged)
+        self.assert_log_match(3, 'ACKNOWLEDGEMENT \(CRITICAL\)')
         self.show_and_clear_logs()
         self.show_actions()
         self.sched.update_downtimes_and_comments()
-        self.assert_(len(svc.comments) == 1)
+        self.assertEqual(1, len(svc.comments))
 
         #--------------------------------------------------------------
         # service reaches hard;2
@@ -96,9 +97,9 @@ class TestAcks(ShinkenTest):
         #--------------------------------------------------------------
         print "- 1 x BAD get hard -------------------------------------"
         self.scheduler_loop(1, [[svc, 2, 'BAD']])
-        self.assert_(self.count_logs() == 2)
-        self.assert_(self.count_actions() == 2)
-        self.assert_(svc.current_notification_number == 0)
+        self.assertEqual(2, self.count_logs())
+        self.assertEqual(2, self.count_actions())
+        self.assertEqual(0, svc.current_notification_number)
         self.show_and_clear_logs()
         self.show_actions()
 
@@ -110,10 +111,10 @@ class TestAcks(ShinkenTest):
         print "- 1 x OK recover"
         self.show_logs()
         self.show_actions()
-        self.assert_(self.count_logs() == 2)  # alert, eventhndlr
-        self.assert_(self.count_actions() == 2)  # evt, master notif
-        self.assert_(not svc.problem_has_been_acknowledged)
-        self.assert_(svc.current_notification_number == 0)
+        self.assertEqual(2, self.count_logs())  # alert, eventhndlr
+        self.assertEqual(1, self.count_actions())  # evt zombie
+        self.assertFalse(svc.problem_has_been_acknowledged)
+        self.assertEqual(0, svc.current_notification_number)
         self.show_and_clear_logs()
         self.show_and_clear_actions()
 
@@ -132,7 +133,7 @@ class TestAcks(ShinkenTest):
         self.scheduler_loop(1, [[host, 0, 'UP']])
         print "- 1 x OK -------------------------------------"
         self.scheduler_loop(1, [[svc, 0, 'OK']])
-        self.assert_(svc.current_notification_number == 0)
+        self.assertEqual(0, svc.current_notification_number)
 
         #--------------------------------------------------------------
         # first check the normal behavior
@@ -142,9 +143,9 @@ class TestAcks(ShinkenTest):
         #--------------------------------------------------------------
         print "- 2 x BAD get hard -------------------------------------"
         self.scheduler_loop(2, [[svc, 2, 'BAD']])
-        self.assert_(svc.current_notification_number == 1)
-        self.assert_(self.count_actions() == 3)
-        self.assert_(self.log_match(5, 'SERVICE NOTIFICATION'))
+        self.assertEqual(1, svc.current_notification_number)
+        self.assertEqual(3, self.count_actions())
+        self.assert_log_match(5, 'SERVICE NOTIFICATION')
         self.show_and_clear_logs()
         self.show_actions()
 
@@ -155,24 +156,25 @@ class TestAcks(ShinkenTest):
         self.scheduler_loop(2, [[svc, 2, 'BAD']], do_sleep=True)
         self.show_and_clear_logs()
         self.show_actions()
-        self.assert_(svc.current_notification_number == 2)
+        self.assertEqual(2, svc.current_notification_number)
 
         #--------------------------------------------------------------
         # admin wakes up and acknowledges the problem
         # the ACK is the only log message
         # a master notification is still around, but can't be sent
         #--------------------------------------------------------------
-        self.assert_(not svc.problem_has_been_acknowledged)
+        self.assertFalse(svc.problem_has_been_acknowledged)
         now = time.time()
         cmd = "[%lu] ACKNOWLEDGE_SVC_PROBLEM;test_host_0;test_ok_0;1;1;0;lausser;blablub" % now
         self.sched.run_external_command(cmd)
         self.sched.get_new_actions()
-        self.worker_loop()
-        self.assert_(svc.problem_has_been_acknowledged)
-        self.assert_(self.log_match(1, 'ACKNOWLEDGEMENT \(CRITICAL\)'))
+        self.scheduler_loop(1, [], do_sleep=False)
+        #self.worker_loop()
+        self.assertTrue(svc.problem_has_been_acknowledged)
+        self.assert_log_match(1, 'ACKNOWLEDGEMENT \(CRITICAL\)')
         self.scheduler_loop(2, [[svc, 2, 'BAD']], do_sleep=True)
-        self.assert_(self.count_logs() == 1)
-        self.assert_(self.count_actions() == 1)
+        self.assertEqual(1, self.count_logs())
+        self.assertEqual(1, self.count_actions())
         self.show_and_clear_logs()
         self.show_actions()
 
@@ -183,20 +185,22 @@ class TestAcks(ShinkenTest):
         now = time.time()
         cmd = "[%lu] REMOVE_SVC_ACKNOWLEDGEMENT;test_host_0;test_ok_0" % now
         self.sched.run_external_command(cmd)
-        self.sched.get_new_actions()
-        self.worker_loop()
+        
+        self.scheduler_loop(1, [], do_sleep=False)
+        #elf.sched.get_new_actions()
+        #self.worker_loop()
         self.show_logs()
         self.show_actions()
         # the contact notification was sent immediately (t_to_go)
-        self.assert_(not svc.problem_has_been_acknowledged)
+        self.assertFalse(svc.problem_has_been_acknowledged)
         self.scheduler_loop(2, [[svc, 2, 'BAD']], do_sleep=True)
         self.show_logs()
         self.show_actions()
-        self.assert_(self.log_match(1, 'SERVICE NOTIFICATION'))
-        self.assert_(self.log_match(2, 'SERVICE NOTIFICATION'))
-        self.assert_(self.count_logs() == 2)
-        self.assert_(self.count_actions() == 2)  # master sched, contact zombie
-        self.assert_(svc.current_notification_number == 4)
+        self.assert_log_match(1, 'SERVICE NOTIFICATION')
+        self.assert_log_match(2, 'SERVICE NOTIFICATION')
+        self.assertEqual(2, self.count_logs())
+        self.assertEqual(2, self.count_actions())  # master sched, contact zombie
+        self.assertEqual(4, svc.current_notification_number)
         self.show_and_clear_logs()
         self.show_actions()
 
@@ -210,12 +214,15 @@ class TestAcks(ShinkenTest):
         print "- 1 x OK recover"
         self.show_logs()
         self.show_actions()
-        self.assert_(self.count_logs() == 3)  # alert, eventhndlr, notif
-        self.assert_(self.count_actions() == 3)  # evt, master notif, notif
-        self.assert_(not svc.problem_has_been_acknowledged)
-        self.assert_(svc.current_notification_number == 0)
+        self.assertEqual(3, self.count_logs())  # alert, eventhndlr, notif
+        self.show_actions()
+        print self.count_actions()
+        self.assertEqual(2, self.count_actions())  # evt, recovery notif zombie
+        self.assertFalse(svc.problem_has_been_acknowledged)
+        self.assertEqual(0, svc.current_notification_number)
         self.show_and_clear_logs()
         self.show_and_clear_actions()
+
 
     def test_ack_nonsticky_changing_service(self):
         # acknowledge is not sticky
@@ -235,7 +242,7 @@ class TestAcks(ShinkenTest):
         self.scheduler_loop(1, [[host, 0, 'UP']])
         print "- 1 x OK -------------------------------------"
         self.scheduler_loop(1, [[svc, 0, 'OK']])
-        self.assert_(svc.current_notification_number == 0)
+        self.assertEqual(0, svc.current_notification_number)
 
         #--------------------------------------------------------------
         # first check the normal behavior
@@ -245,9 +252,9 @@ class TestAcks(ShinkenTest):
         #--------------------------------------------------------------
         print "- 2 x BAD get hard -------------------------------------"
         self.scheduler_loop(2, [[svc, 2, 'BAD']])
-        self.assert_(svc.current_notification_number == 1)
-        self.assert_(self.count_actions() == 3)
-        self.assert_(self.log_match(5, 'SERVICE NOTIFICATION'))
+        self.assertEqual(1, svc.current_notification_number)
+        self.assertEqual(3, self.count_actions())
+        self.assert_log_match(5, 'SERVICE NOTIFICATION')
         self.show_and_clear_logs()
         self.show_actions()
 
@@ -258,24 +265,25 @@ class TestAcks(ShinkenTest):
         self.scheduler_loop(2, [[svc, 2, 'BAD']], do_sleep=True)
         self.show_and_clear_logs()
         self.show_actions()
-        self.assert_(svc.current_notification_number == 2)
+        self.assertEqual(2, svc.current_notification_number)
 
         #--------------------------------------------------------------
         # admin wakes up and acknowledges the problem
         # the ACK is the only log message
         # a master notification is still around, but can't be sent
         #--------------------------------------------------------------
-        self.assert_(not svc.problem_has_been_acknowledged)
+        self.assertFalse(svc.problem_has_been_acknowledged)
         now = time.time()
         cmd = "[%lu] ACKNOWLEDGE_SVC_PROBLEM;test_host_0;test_ok_0;1;1;1;lausser;blablub" % now
         self.sched.run_external_command(cmd)
         self.sched.get_new_actions()
-        self.worker_loop()
-        self.assert_(svc.problem_has_been_acknowledged)
-        self.assert_(self.log_match(1, 'ACKNOWLEDGEMENT \(CRITICAL\)'))
+        self.scheduler_loop(1, [], do_sleep=False)
+        #self.worker_loop()
+        self.assertTrue(svc.problem_has_been_acknowledged)
+        self.assert_log_match(1, 'ACKNOWLEDGEMENT \(CRITICAL\)')
         self.scheduler_loop(2, [[svc, 2, 'BAD']], do_sleep=True)
-        self.assert_(self.count_logs() == 1)
-        self.assert_(self.count_actions() == 1)
+        self.assertEqual(1, self.count_logs())
+        self.assertEqual(1, self.count_actions())
         self.show_and_clear_logs()
         self.show_actions()
 
@@ -284,15 +292,15 @@ class TestAcks(ShinkenTest):
         # ack is deleted automatically and notifications are sent again
         #--------------------------------------------------------------
         self.scheduler_loop(2, [[svc, 1, 'NOT REALLY BAD']], do_sleep=True)
-        self.assert_(not svc.problem_has_been_acknowledged)
+        self.assertFalse(svc.problem_has_been_acknowledged)
         self.show_logs()
         self.show_actions()
-        self.assert_(self.log_match(1, 'SERVICE ALERT.*WARNING'))
-        self.assert_(self.log_match(2, 'SERVICE NOTIFICATION'))
-        self.assert_(self.log_match(3, 'SERVICE NOTIFICATION'))
-        self.assert_(self.count_logs() == 3)
-        self.assert_(self.count_actions() == 2)  # master sched, contact zombie
-        self.assert_(svc.current_notification_number == 4)
+        self.assert_log_match(1, 'SERVICE ALERT.*WARNING')
+        self.assert_log_match(2, 'SERVICE NOTIFICATION')
+        self.assert_log_match(3, 'SERVICE NOTIFICATION')
+        self.assertEqual(3, self.count_logs())
+        self.assertEqual(2, self.count_actions())  # master sched, contact zombie
+        self.assertEqual(4, svc.current_notification_number)
         self.show_and_clear_logs()
         self.show_actions()
 
@@ -304,12 +312,15 @@ class TestAcks(ShinkenTest):
         print "- 1 x OK recover"
         self.show_logs()
         self.show_actions()
-        self.assert_(self.count_logs() == 3)  # alert, eventhndlr, notification
-        self.assert_(self.count_actions() == 3)  # evt, master notif, contact notif
-        self.assert_(not svc.problem_has_been_acknowledged)
-        self.assert_(svc.current_notification_number == 0)
+        self.assertEqual(3, self.count_logs())  # alert, eventhndlr, notification
+
+        self.show_actions()
+        self.assertEqual(2, self.count_actions())  # evt, one notif zombie left
+        self.assertFalse(svc.problem_has_been_acknowledged)
+        self.assertEqual(0, svc.current_notification_number)
         self.show_and_clear_logs()
         self.show_and_clear_actions()
+        
 
     def test_ack_sticky_changing_service(self):
         # acknowledge is sticky
@@ -329,7 +340,7 @@ class TestAcks(ShinkenTest):
         self.scheduler_loop(1, [[host, 0, 'UP']])
         print "- 1 x OK -------------------------------------"
         self.scheduler_loop(1, [[svc, 0, 'OK']])
-        self.assert_(svc.current_notification_number == 0)
+        self.assertEqual(0, svc.current_notification_number)
 
         #--------------------------------------------------------------
         # first check the normal behavior
@@ -339,9 +350,9 @@ class TestAcks(ShinkenTest):
         #--------------------------------------------------------------
         print "- 2 x BAD get hard -------------------------------------"
         self.scheduler_loop(2, [[svc, 2, 'BAD']])
-        self.assert_(svc.current_notification_number == 1)
-        self.assert_(self.count_actions() == 3)
-        self.assert_(self.log_match(5, 'SERVICE NOTIFICATION'))
+        self.assertEqual(1, svc.current_notification_number)
+        self.assertEqual(3, self.count_actions())
+        self.assert_log_match(5, 'SERVICE NOTIFICATION')
         self.show_and_clear_logs()
         self.show_actions()
 
@@ -352,24 +363,25 @@ class TestAcks(ShinkenTest):
         self.scheduler_loop(2, [[svc, 2, 'BAD']], do_sleep=True)
         self.show_and_clear_logs()
         self.show_actions()
-        self.assert_(svc.current_notification_number == 2)
+        self.assertEqual(2, svc.current_notification_number)
 
         #--------------------------------------------------------------
         # admin wakes up and acknowledges the problem
         # the ACK is the only log message
         # a master notification is still around, but can't be sent
         #--------------------------------------------------------------
-        self.assert_(not svc.problem_has_been_acknowledged)
+        self.assertFalse(svc.problem_has_been_acknowledged)
         now = time.time()
         cmd = "[%lu] ACKNOWLEDGE_SVC_PROBLEM;test_host_0;test_ok_0;2;1;0;lausser;blablub" % now
         self.sched.run_external_command(cmd)
-        self.sched.get_new_actions()
-        self.worker_loop()
-        self.assert_(svc.problem_has_been_acknowledged)
-        self.assert_(self.log_match(1, 'ACKNOWLEDGEMENT \(CRITICAL\)'))
+        self.scheduler_loop(1, [], do_sleep=True)
+        #self.sched.get_new_actions()
+        #self.worker_loop()
+        self.assertTrue(svc.problem_has_been_acknowledged)
+        self.assert_log_match(1, 'ACKNOWLEDGEMENT \(CRITICAL\)')
         self.scheduler_loop(2, [[svc, 2, 'BAD']], do_sleep=True)
-        self.assert_(self.count_logs() == 1)
-        self.assert_(self.count_actions() == 1)
+        self.assertEqual(1, self.count_logs())
+        self.assertEqual(1, self.count_actions())
         self.show_and_clear_logs()
         self.show_actions()
 
@@ -378,16 +390,16 @@ class TestAcks(ShinkenTest):
         # ack remains set
         #--------------------------------------------------------------
         self.scheduler_loop(2, [[svc, 1, 'NOT REALLY BAD']], do_sleep=True)
-        self.assert_(svc.problem_has_been_acknowledged)
+        self.assertTrue(svc.problem_has_been_acknowledged)
         self.show_logs()
         self.show_actions()
-        self.assert_(self.log_match(1, 'SERVICE ALERT.*WARNING'))
-        self.assert_(self.count_logs() == 1)  # alert
-        self.assert_(svc.current_notification_number == 2)
+        self.assert_log_match(1, 'SERVICE ALERT.*WARNING')
+        self.assertEqual(1, self.count_logs())  # alert
+        self.assertEqual(2, svc.current_notification_number)
         self.show_and_clear_logs()
         self.show_actions()
-        self.assert_(len(svc.comments) == 1)
-        self.assert_(svc.comments[0].comment == 'blablub')
+        self.assertEqual(1, len(svc.comments))
+        self.assertEqual('blablub', svc.comments[0].comment)
 
         #--------------------------------------------------------------
         # recover
@@ -397,11 +409,11 @@ class TestAcks(ShinkenTest):
         print "- 1 x OK recover"
         self.show_logs()
         self.show_actions()
-        self.assert_(self.count_logs() == 3)  # alert, eventhndlr, notification
-        self.assert_(self.count_actions() == 3)  # evt, master notif, contact notif
-        self.assert_(not svc.problem_has_been_acknowledged)
-        self.assert_(svc.current_notification_number == 0)
-        self.assert_(len(svc.comments) == 0)
+        self.assertEqual(3, self.count_logs())  # alert, eventhndlr, notification
+        self.assertEqual(2, self.count_actions())  # evt, master notif
+        self.assertFalse(svc.problem_has_been_acknowledged)
+        self.assertEqual(0, svc.current_notification_number)
+        self.assertEqual(0, len(svc.comments))
         self.show_and_clear_logs()
         self.show_and_clear_actions()
 
@@ -423,7 +435,7 @@ class TestAcks(ShinkenTest):
         self.scheduler_loop(1, [[host, 0, 'UP']])
         print "- 1 x OK -------------------------------------"
         self.scheduler_loop(1, [[svc, 0, 'OK']])
-        self.assert_(host.current_notification_number == 0)
+        self.assertEqual(0, host.current_notification_number)
 
         #--------------------------------------------------------------
         # first check the normal behavior
@@ -433,9 +445,9 @@ class TestAcks(ShinkenTest):
         #--------------------------------------------------------------
         print "- 3 x DOWN get hard -------------------------------------"
         self.scheduler_loop(3, [[host, 2, 'DOWN']])
-        self.assert_(host.current_notification_number == 1)
-        self.assert_(self.count_actions() == 3)
-        self.assert_(self.log_match(7, 'HOST NOTIFICATION'))
+        self.assertEqual(1, host.current_notification_number)
+        self.assertEqual(3, self.count_actions())
+        self.assert_log_match(7, 'HOST NOTIFICATION')
         self.show_and_clear_logs()
         self.show_and_clear_actions()
         # clean up
@@ -449,19 +461,20 @@ class TestAcks(ShinkenTest):
         #--------------------------------------------------------------
         print "- 1 x BAD get soft -------------------------------------"
         self.scheduler_loop(1, [[host, 2, 'DOWN']])
-        self.assert_(host.current_notification_number == 0)
+        self.assertEqual(0, host.current_notification_number)
 
         #--------------------------------------------------------------
         # someone acknowledges the problem before a notification goes out
         #--------------------------------------------------------------
-        self.assert_(not host.problem_has_been_acknowledged)
+        self.assertFalse(host.problem_has_been_acknowledged)
         now = time.time()
         cmd = "[%lu] ACKNOWLEDGE_HOST_PROBLEM;test_host_0;1;1;0;lausser;blablub" % now
         self.sched.run_external_command(cmd)
-        self.sched.get_new_actions()
-        self.worker_loop()
-        self.assert_(host.problem_has_been_acknowledged)
-        self.assert_(self.log_match(3, 'ACKNOWLEDGEMENT \(DOWN\)'))
+        self.scheduler_loop(1, [], do_sleep=False)
+        #self.sched.get_new_actions()
+        #self.worker_loop()
+        self.assertTrue(host.problem_has_been_acknowledged)
+        self.assert_log_match(3, 'ACKNOWLEDGEMENT \(DOWN\)')
         self.show_and_clear_logs()
         self.show_actions()
 
@@ -476,9 +489,9 @@ class TestAcks(ShinkenTest):
         self.scheduler_loop(2, [[host, 2, 'DOWN']])
         self.show_logs()
         self.show_actions()
-        self.assert_(self.count_logs() == 4)
-        self.assert_(self.count_actions() == 2)
-        self.assert_(host.current_notification_number == 0)
+        self.assertEqual(4, self.count_logs())
+        self.assertEqual(2, self.count_actions())
+        self.assertEqual(0, host.current_notification_number)
         self.show_and_clear_logs()
         self.show_actions()
 
@@ -492,13 +505,17 @@ class TestAcks(ShinkenTest):
         print "- 1 x OK recover"
         self.show_logs()
         self.show_actions()
-        self.assert_(self.count_logs() == 2)  # alert, eventhndlr, notification
-        self.assert_(self.count_actions() == 2)  # evt, master notif, contact notif
-        self.assert_(not host.problem_has_been_acknowledged)
-        self.assert_(host.current_notification_number == 0)
+        self.assertEqual(2, self.count_logs())  # alert, eventhndlr, notification
+        self.show_actions()
+        
+        print self.count_actions()
+        self.assertEqual(1, self.count_actions())  # evt, no more notif
+        self.assertFalse(host.problem_has_been_acknowledged)
+        self.assertEqual(0, host.current_notification_number)
         self.show_and_clear_logs()
         self.show_and_clear_actions()
 
+        
     def test_ack_hard_host(self):
         self.print_header()
         now = time.time()
@@ -514,7 +531,7 @@ class TestAcks(ShinkenTest):
         self.scheduler_loop(1, [[host, 0, 'UP']])
         print "- 1 x OK -------------------------------------"
         self.scheduler_loop(1, [[svc, 0, 'OK']])
-        self.assert_(host.current_notification_number == 0)
+        self.assertEqual(0, host.current_notification_number)
 
         #--------------------------------------------------------------
         # first check the normal behavior
@@ -524,9 +541,9 @@ class TestAcks(ShinkenTest):
         #--------------------------------------------------------------
         print "- 2 x BAD get hard -------------------------------------"
         self.scheduler_loop(3, [[host, 2, 'DOWN']])
-        self.assert_(host.current_notification_number == 1)
-        self.assert_(self.count_actions() == 3)
-        self.assert_(self.log_match(7, 'HOST NOTIFICATION'))
+        self.assertEqual(1, host.current_notification_number)
+        self.assertEqual(3, self.count_actions())
+        self.assert_log_match(7, 'HOST NOTIFICATION')
         self.show_and_clear_logs()
         self.show_actions()
 
@@ -537,24 +554,25 @@ class TestAcks(ShinkenTest):
         self.scheduler_loop(2, [[host, 2, 'DOWN']], do_sleep=True)
         self.show_and_clear_logs()
         self.show_actions()
-        self.assert_(host.current_notification_number == 2)
+        self.assertEqual(2, host.current_notification_number)
 
         #--------------------------------------------------------------
         # admin wakes up and acknowledges the problem
         # the ACK is the only log message
         # a master notification is still around, but can't be sent
         #--------------------------------------------------------------
-        self.assert_(not host.problem_has_been_acknowledged)
+        self.assertFalse(host.problem_has_been_acknowledged)
         now = time.time()
         cmd = "[%lu] ACKNOWLEDGE_HOST_PROBLEM;test_host_0;1;1;0;lausser;blablub" % now
         self.sched.run_external_command(cmd)
         self.sched.get_new_actions()
-        self.worker_loop()
-        self.assert_(host.problem_has_been_acknowledged)
-        self.assert_(self.log_match(1, 'ACKNOWLEDGEMENT \(DOWN\)'))
+        self.scheduler_loop(1, [], do_sleep=False)
+        #self.worker_loop()
+        self.assertTrue(host.problem_has_been_acknowledged)
+        self.assert_log_match(1, 'ACKNOWLEDGEMENT \(DOWN\)')
         self.scheduler_loop(2, [[host, 2, 'DOWN']], do_sleep=True)
-        self.assert_(self.count_logs() == 1)
-        self.assert_(self.count_actions() == 1)
+        self.assertEqual(1, self.count_logs())
+        self.assertEqual(1, self.count_actions())
         self.show_and_clear_logs()
         self.show_actions()
 
@@ -566,17 +584,18 @@ class TestAcks(ShinkenTest):
         cmd = "[%lu] REMOVE_HOST_ACKNOWLEDGEMENT;test_host_0" % now
         self.sched.run_external_command(cmd)
         self.sched.get_new_actions()
-        self.worker_loop()
+        self.scheduler_loop(1, [], do_sleep=False)
+        #self.worker_loop()
         # the contact notification was sent immediately (t_to_go)
-        self.assert_(not host.problem_has_been_acknowledged)
+        self.assertFalse(host.problem_has_been_acknowledged)
         self.scheduler_loop(2, [[host, 2, 'DOWN']], do_sleep=True)
         self.show_logs()
         self.show_actions()
-        self.assert_(self.log_match(1, 'HOST NOTIFICATION'))
-        self.assert_(self.log_match(2, 'HOST NOTIFICATION'))
-        self.assert_(self.count_logs() == 2)
-        self.assert_(self.count_actions() == 2)  # master sched, contact zombie
-        self.assert_(host.current_notification_number == 4)
+        self.assert_log_match(1, 'HOST NOTIFICATION')
+        self.assert_log_match(2, 'HOST NOTIFICATION')
+        self.assertEqual(2, self.count_logs())
+        self.assertEqual(2, self.count_actions())  # master sched, contact zombie
+        self.assertEqual(4, host.current_notification_number)
         self.show_and_clear_logs()
         self.show_actions()
 
@@ -588,12 +607,15 @@ class TestAcks(ShinkenTest):
         print "- 1 x OK recover"
         self.show_logs()
         self.show_actions()
-        self.assert_(self.count_logs() == 3)  # alert, eventhndlr, notification
-        self.assert_(self.count_actions() == 3)  # evt, master notif, contact notif
-        self.assert_(not host.problem_has_been_acknowledged)
-        self.assert_(host.current_notification_number == 0)
+        self.assertEqual(3, self.count_logs())  # alert, eventhndlr, notification
+        print self.count_actions()
+        self.show_actions()
+        self.assertEqual(2, self.count_actions())  # evt,  recovery notif zombie
+        self.assertFalse(host.problem_has_been_acknowledged)
+        self.assertEqual(0, host.current_notification_number)
         self.show_and_clear_logs()
         self.show_and_clear_actions()
+        
 
     def test_unack_removes_comments(self):
         # critical
@@ -617,7 +639,7 @@ class TestAcks(ShinkenTest):
         self.scheduler_loop(1, [[host, 0, 'UP']])
         print "- 1 x OK -------------------------------------"
         self.scheduler_loop(1, [[svc, 0, 'OK']])
-        self.assert_(svc.current_notification_number == 0)
+        self.assertEqual(0, svc.current_notification_number)
 
         #--------------------------------------------------------------
         # first check the normal behavior
@@ -627,9 +649,9 @@ class TestAcks(ShinkenTest):
         #--------------------------------------------------------------
         print "- 2 x BAD get hard -------------------------------------"
         self.scheduler_loop(2, [[svc, 2, 'BAD']])
-        self.assert_(svc.current_notification_number == 1)
-        self.assert_(self.count_actions() == 3)
-        self.assert_(self.log_match(5, 'SERVICE NOTIFICATION'))
+        self.assertEqual(1, svc.current_notification_number)
+        self.assertEqual(3, self.count_actions())
+        self.assert_log_match(5, 'SERVICE NOTIFICATION')
         self.show_and_clear_logs()
         self.show_actions()
 
@@ -640,43 +662,42 @@ class TestAcks(ShinkenTest):
         self.scheduler_loop(2, [[svc, 2, 'BAD']], do_sleep=True)
         self.show_and_clear_logs()
         self.show_actions()
-        self.assert_(svc.current_notification_number == 2)
+        self.assertEqual(2, svc.current_notification_number)
 
         #--------------------------------------------------------------
         # admin wakes up and acknowledges the problem
         # the ACK is the only log message
         # a master notification is still around, but can't be sent
         #--------------------------------------------------------------
-        self.assert_(not svc.problem_has_been_acknowledged)
+        self.assertFalse(svc.problem_has_been_acknowledged)
         now = time.time()
         cmd = "[%lu] ACKNOWLEDGE_SVC_PROBLEM;test_host_0;test_ok_0;2;1;1;lausser;blablub1" % now
         self.sched.run_external_command(cmd)
-        self.sched.get_new_actions()
-        self.worker_loop()
+        self.scheduler_loop(1, [], do_sleep=True)
         now = time.time()
         cmd = "[%lu] ACKNOWLEDGE_SVC_PROBLEM;test_host_0;test_ok_0;2;1;1;lausser;blablub2" % now
         self.sched.run_external_command(cmd)
-        self.sched.get_new_actions()
-        self.worker_loop()
+        self.scheduler_loop(1, [], do_sleep=True)
         now = time.time()
         cmd = "[%lu] ACKNOWLEDGE_SVC_PROBLEM;test_host_0;test_ok_0;2;1;0;lausser;blablub3" % now
         self.sched.run_external_command(cmd)
-        self.sched.get_new_actions()
-        self.worker_loop()
-        self.assert_(svc.problem_has_been_acknowledged)
-        self.assert_(self.log_match(1, 'ACKNOWLEDGEMENT \(CRITICAL\)'))
-        self.assert_(self.log_match(2, 'ACKNOWLEDGEMENT \(CRITICAL\)'))
-        self.assert_(self.log_match(3, 'ACKNOWLEDGEMENT \(CRITICAL\)'))
+        self.scheduler_loop(1, [], do_sleep=True)
+
+        self.assertTrue(svc.problem_has_been_acknowledged)
+        self.show_logs()
+        self.assert_log_match(1, 'ACKNOWLEDGEMENT \(CRITICAL\)')
+        self.assert_log_match(2, 'ACKNOWLEDGEMENT \(CRITICAL\)')
+        self.assert_log_match(3, 'ACKNOWLEDGEMENT \(CRITICAL\)')
         self.scheduler_loop(1, [[svc, 2, 'BAD']], do_sleep=True)
-        self.assert_(self.count_actions() == 1)
+        self.assertEqual(1, self.count_actions())
         self.show_and_clear_logs()
         self.show_actions()
-        self.assert_(len(svc.comments) == 3)
+        self.assertEqual(3, len(svc.comments))
         print "- 2 x BAD stay hard -------------------------------------"
         self.scheduler_loop(2, [[svc, 2, 'BAD']], do_sleep=True)
         self.show_and_clear_logs()
         self.show_actions()
-        self.assert_(svc.current_notification_number == 2)
+        self.assertEqual(2, svc.current_notification_number)
 
         #--------------------------------------------------------------
         # remove the ack. the 2 persistent comments must remain
@@ -685,11 +706,12 @@ class TestAcks(ShinkenTest):
         cmd = "[%lu] REMOVE_SVC_ACKNOWLEDGEMENT;test_host_0;test_ok_0" % now
         self.sched.run_external_command(cmd)
         self.sched.get_new_actions()
-        self.worker_loop()
-        self.assert_(not svc.problem_has_been_acknowledged)
-        self.assert_(len(svc.comments) == 2)
-        self.assert_(svc.comments[0].comment == 'blablub1')
-        self.assert_(svc.comments[1].comment == 'blablub2')
+        self.scheduler_loop(1, [], do_sleep=False)
+        #self.worker_loop()
+        self.assertFalse(svc.problem_has_been_acknowledged)
+        self.assertEqual(2, len(svc.comments))
+        self.assertEqual('blablub1', svc.comments[0].comment)
+        self.assertEqual('blablub2', svc.comments[1].comment)
 
 
 # service is critical, notification is out

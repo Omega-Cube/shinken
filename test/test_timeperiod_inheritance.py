@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (C) 2009-2010:
+# Copyright (C) 2009-2014:
 #    Gabes Jean, naparuba@gmail.com
 #    Gerhard Lausser, Gerhard.Lausser@consol.de
 #
@@ -28,7 +28,7 @@ from shinken_test import *
 class TestConfig(ShinkenTest):
 
     def setUp(self):
-        self.setup_with_file('etc/nagios_timeperiod_inheritance.cfg')
+        self.setup_with_file('etc/shinken_timeperiod_inheritance.cfg')
 
     def test_dummy(self):
         #
@@ -47,7 +47,7 @@ class TestConfig(ShinkenTest):
             print dr.__dict__
             if hasattr(dr, 'day') and dr.day == 'sunday':
                 got_sunday = True
-        self.assert_(got_sunday == True)
+        self.assertEqual(True, got_sunday)
 
 
 if __name__ == '__main__':

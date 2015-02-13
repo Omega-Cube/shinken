@@ -1,8 +1,7 @@
 #!/usr/bin/python
-
 # -*- coding: utf-8 -*-
 
-# Copyright (C) 2009-2012:
+# Copyright (C) 2009-2014:
 #    Gabes Jean, naparuba@gmail.com
 #    Gerhard Lausser, Gerhard.Lausser@consol.de
 #    Gregory Starck, g.starck@gmail.com
@@ -32,110 +31,152 @@ import socket
 import traceback
 import cStringIO
 import cPickle
+import copy
+import json
 
 from shinken.objects.config import Config
 from shinken.external_command import ExternalCommandManager
 from shinken.dispatcher import Dispatcher
 from shinken.daemon import Daemon, Interface
 from shinken.log import logger
+from shinken.stats import statsmgr
 from shinken.brok import Brok
 from shinken.external_command import ExternalCommand
-
+from shinken.property import BoolProp
+from shinken.util import jsonify_r
 
 # Interface for the other Arbiter
 # It connects, and together we decide who's the Master and who's the Slave, etc.
 # Here is a also a function to get a new conf from the master
 class IForArbiter(Interface):
 
+    doc = 'Does the daemon got a configuration (internal)'
     def have_conf(self, magic_hash):
+        # Beware, we got an str in entry, not an int
+        magic_hash = int(magic_hash)
         # I've got a conf and a good one
         if self.app.cur_conf and self.app.cur_conf.magic_hash == magic_hash:
             return True
         else:  # I've no conf or a bad one
             return False
+    have_conf.doc = doc
 
+
+    doc = 'Put a new configuration to the daemon'
     # The master Arbiter is sending us a new conf in a pickle way. Ok, we take it
-    def put_conf(self, conf_raw):
-        conf = cPickle.loads(conf_raw)
+    def put_conf(self, conf):
+        conf = cPickle.loads(conf)
         super(IForArbiter, self).put_conf(conf)
         self.app.must_run = False
+    put_conf.method = 'POST'
+    put_conf.doc = doc
 
+
+    doc = 'Get the managed configuration (internal)'
     def get_config(self):
         return self.app.conf
+    get_config.doc = doc
 
+
+    doc = 'Ask the daemon to do not run'
     # The master arbiter asks me not to run!
     def do_not_run(self):
         # If I'm the master, ignore the command
         if self.app.is_master:
-            logger.debug("Received message to not run. I am the Master, ignore and continue to run.")
+            logger.debug("Received message to not run. "
+                         "I am the Master, ignore and continue to run.")
         # Else, I'm just a spare, so I listen to my master
         else:
             logger.debug("Received message to not run. I am the spare, stopping.")
             self.app.last_master_speack = time.time()
             self.app.must_run = False
+    do_not_run.need_lock = False
+    do_not_run.doc = doc
 
-    # Here a function called by check_shinken to get daemon status
-    def get_satellite_status(self, daemon_type, daemon_name):
-        daemon_name_attr = daemon_type + "_name"
-        daemons = self.app.get_daemons(daemon_type)
-        if daemons:
-            for dae in daemons:
-                if hasattr(dae, daemon_name_attr) and getattr(dae, daemon_name_attr) == daemon_name:
-                    if hasattr(dae, 'alive') and hasattr(dae, 'spare'):
-                        return {'alive': dae.alive, 'spare': dae.spare}
-        return None
 
+    doc = 'Get the satellite names sort by type'
     # Here a function called by check_shinken to get daemons list
-    def get_satellite_list(self, daemon_type):
-        satellite_list = []
-        daemon_name_attr = daemon_type + "_name"
-        daemons = self.app.get_daemons(daemon_type)
-        if daemons:
+    def get_satellite_list(self, daemon_type=''):
+        res = {}
+        for t in ['arbiter', 'scheduler', 'poller', 'reactionner', 'receiver',
+                  'broker']:
+            if daemon_type and daemon_type != t:
+                continue
+            satellite_list = []
+            res[t] = satellite_list
+            daemon_name_attr = t + "_name"
+            daemons = self.app.get_daemons(t)
             for dae in daemons:
                 if hasattr(dae, daemon_name_attr):
                     satellite_list.append(getattr(dae, daemon_name_attr))
-                else:
-                    # If one daemon has no name... ouch!
-                    return None
-            return satellite_list
-        return None
+        return res
+    get_satellite_list.doc = doc
 
+
+    doc = 'Dummy call for the arbiter'
     # Dummy call. We are the master, we manage what we want
     def what_i_managed(self):
         return {}
+    what_i_managed.need_lock = False
+    what_i_managed.doc = doc
 
+
+    doc = 'Return all the data of the satellites'
+    # We will try to export all data from our satellites, but only the json-able fields
     def get_all_states(self):
-        res = {'arbiter': self.app.conf.arbiters,
-               'scheduler': self.app.conf.schedulers,
-               'poller': self.app.conf.pollers,
-               'reactionner': self.app.conf.reactionners,
-               'receiver': self.app.conf.receivers,
-               'broker': self.app.conf.brokers}
+        res = {}
+        for t in ['arbiter', 'scheduler', 'poller', 'reactionner', 'receiver',
+                  'broker']:
+            lst = []
+            res[t] = lst
+            for d in getattr(self.app.conf, t + 's'):
+                cls = d.__class__
+                e = {}
+                ds = [cls.properties, cls.running_properties]
+
+                for _d in ds:
+                    for prop in _d:
+                        if hasattr(d, prop):
+                            v = getattr(d, prop)
+                            if prop == "realm":
+                                if hasattr(v, "realm_name"):
+                                    e[prop] = v.realm_name
+                            # give a try to a json able object
+                            try:
+                                json.dumps(v)
+                                e[prop] = v
+                            except Exception, exp:
+                                logger.debug('%s', exp)
+                lst.append(e)
         return res
+    get_all_states.doc = doc
+
 
     # Try to give some properties of our objects
-    def get_objects_properties(self, table, *properties):
-        logger.debug('ASK:: table= %s, properties= %s' % (str(table), str(properties)))
+    doc = 'Dump all objects of the type in [hosts, services, contacts, ' \
+          'commands, hostgroups, servicegroups]'
+    def get_objects_properties(self, table):
+        logger.debug('ASK:: table= %s', str(table))
         objs = getattr(self.app.conf, table, None)
-        logger.debug("OBJS:: %s" % str(objs))
-        if not objs:
-            return ''
+        logger.debug("OBJS:: %s", str(objs))
+        if objs is None or len(objs) == 0:
+            return []
         res = []
         for obj in objs:
-            l = []
-            for prop in properties:
-                v = getattr(obj, prop, '')
-                l.append(v)
+            l = jsonify_r(obj)
             res.append(l)
         return res
+    get_objects_properties.doc = doc
 
 
 # Main Arbiter Class
 class Arbiter(Daemon):
 
-    def __init__(self, config_files, is_daemon, do_replace, verify_only, debug, debug_file, profile=None, analyse=None, migrate=None, arb_name=''):
+    def __init__(self, config_files, is_daemon, do_replace, verify_only, debug,
+                 debug_file, profile=None, analyse=None, migrate=None, arb_name=''):
 
-        super(Arbiter, self).__init__('arbiter', config_files[0], is_daemon, do_replace, debug, debug_file)
+        super(Arbiter, self).__init__('arbiter', config_files[0], is_daemon, do_replace,
+                                      debug, debug_file)
 
         self.config_files = config_files
         self.verify_only = verify_only
@@ -161,6 +202,7 @@ class Arbiter(Daemon):
         self.conf = Config()
 
 
+
     # Use for adding things like broks
     def add(self, b):
         if isinstance(b, Brok):
@@ -168,7 +210,7 @@ class Arbiter(Daemon):
         elif isinstance(b, ExternalCommand):
             self.external_commands.append(b)
         else:
-            logger.warning('Cannot manage object type %s (%s)' % (type(b), b))
+            logger.warning('Cannot manage object type %s (%s)', type(b), b)
 
     # We must push our broks to the broker
     # because it's stupid to make a crossing connection
@@ -201,7 +243,7 @@ class Arbiter(Daemon):
     # Our links to satellites can raise broks. We must send them
     def get_broks_from_satellitelinks(self):
         tabs = [self.conf.brokers, self.conf.schedulers,
-                    self.conf.pollers, self.conf.reactionners,
+                self.conf.pollers, self.conf.reactionners,
                 self.conf.receivers]
         for tab in tabs:
             for s in tab:
@@ -219,14 +261,17 @@ class Arbiter(Daemon):
                 b = s.get_initial_status_brok()
                 self.add(b)
 
+
     # Load the external commander
     def load_external_command(self, e):
         self.external_command = e
         self.fifo = e.open()
 
+
     def get_daemon_links(self, daemon_type):
         # the attribute name to get these differs for schedulers and arbiters
         return daemon_type + 's'
+
 
     def load_config_file(self):
         logger.info("Loading configuration")
@@ -250,9 +295,21 @@ class Arbiter(Daemon):
                 self.me = arb
                 self.is_master = not self.me.spare
                 if self.is_master:
-                    logger.info("I am the master Arbiter: %s" % arb.get_name())
+                    logger.info("I am the master Arbiter: %s", arb.get_name())
                 else:
-                    logger.info("I am a spare Arbiter: %s" % arb.get_name())
+                    logger.info("I am a spare Arbiter: %s", arb.get_name())
+                # export this data to our statsmgr object :)
+                api_key = getattr(self.conf, 'api_key', '')
+                secret = getattr(self.conf, 'secret', '')
+                http_proxy = getattr(self.conf, 'http_proxy', '')
+                statsd_host = getattr(self.conf, 'statsd_host', 'localhost')
+                statsd_port = getattr(self.conf, 'statsd_port', 8125)
+                statsd_prefix = getattr(self.conf, 'statsd_prefix', 'shinken')
+                statsd_enabled = getattr(self.conf, 'statsd_enabled', False)
+                statsmgr.register(self, arb.get_name(), 'arbiter',
+                                  api_key=api_key, secret=secret, http_proxy=http_proxy,
+                                  statsd_host=statsd_host, statsd_port=statsd_port,
+                                  statsd_prefix=statsd_prefix, statsd_enabled=statsd_enabled)
 
                 # Set myself as alive ;)
                 self.me.alive = True
@@ -268,6 +325,10 @@ class Arbiter(Daemon):
 
         logger.info("My own modules: " + ','.join([m.get_name() for m in self.me.modules]))
 
+        self.modules_dir = getattr(self.conf, 'modules_dir', '')
+
+        # Ok it's time to load the module manager now!
+        self.load_modules_manager()
         # we request the instances without them being *started*
         # (for those that are concerned ("external" modules):
         # we will *start* these instances after we have been daemonized (if requested)
@@ -280,45 +341,47 @@ class Arbiter(Daemon):
         # Now we ask for configuration modules if they
         # got items for us
         for inst in self.modules_manager.instances:
-            if 'configuration' in inst.phases:
+            # TODO : clean
+            if hasattr(inst, 'get_objects'):
+                _t = time.time()
                 try:
                     r = inst.get_objects()
                 except Exception, exp:
-                    logger.error("Instance %s raised an exception %s. Log and continue to run" % (inst.get_name(), str(exp)))
+                    logger.error("Instance %s raised an exception %s. Log and continue to run",
+                                 inst.get_name(), str(exp))
                     output = cStringIO.StringIO()
                     traceback.print_exc(file=output)
-                    logger.error("Back trace of this remove: %s" % (output.getvalue()))
+                    logger.error("Back trace of this remove: %s", output.getvalue())
                     output.close()
                     continue
-
+                statsmgr.incr('hook.get-objects', time.time() - _t)
                 types_creations = self.conf.types_creations
                 for k in types_creations:
-                    (cls, clss, prop) = types_creations[k]
+                    (cls, clss, prop, dummy) = types_creations[k]
                     if prop in r:
                         for x in r[prop]:
                             # test if raw_objects[k] are already set - if not, add empty array
-                            if not k in raw_objects:
+                            if k not in raw_objects:
                                 raw_objects[k] = []
                             # now append the object
                             raw_objects[k].append(x)
-                        logger.debug("Added %i objects to %s from module %s" % (len(r[prop]), k, inst.get_name()))
+                        logger.debug("Added %i objects to %s from module %s",
+                                     len(r[prop]), k, inst.get_name())
 
-        ### Resume standard operations ###
+        # Resume standard operations ###
         self.conf.create_objects(raw_objects)
 
         # Maybe conf is already invalid
         if not self.conf.conf_is_correct:
-            sys.exit("***> One or more problems was encountered while processing the config files...")
-
-        # Change Nagios2 names to Nagios3 ones
-        self.conf.old_properties_names_to_new()
+            sys.exit("***> One or more problems was encountered "
+                     "while processing the config files...")
 
         # Manage all post-conf modules
         self.hook_point('early_configuration')
 
         # Ok here maybe we should stop because we are in a pure migration run
         if self.migrate:
-            print "Migration MODE. Early exiting from configuration relinking phase"
+            logger.info("Migration MODE. Early exiting from configuration relinking phase")
             return
 
         # Load all file triggers
@@ -333,12 +396,6 @@ class Arbiter(Daemon):
         # Explode between types
         self.conf.explode()
 
-        # Create Name reversed list for searching list
-        self.conf.create_reversed_list()
-
-        # Cleaning Twins objects
-        self.conf.remove_twins()
-
         # Implicit inheritance for services
         self.conf.apply_implicit_inheritance()
 
@@ -351,12 +408,8 @@ class Arbiter(Daemon):
         # We compute simple item hash
         self.conf.compute_hash()
 
-        # We removed templates, and so we must recompute the
-        # search lists
-        self.conf.create_reversed_list()
-
-        # Pythonize values
-        self.conf.pythonize()
+        # Overrides sepecific service instaces properties
+        self.conf.override_properties()
 
         # Linkify objects to each other
         self.conf.linkify()
@@ -384,7 +437,6 @@ class Arbiter(Daemon):
         # And link them
         self.conf.create_business_rules_dependencies()
 
-
         # Warn about useless parameters in Shinken
         if self.verify_only:
             self.conf.notice_about_useless_parameters()
@@ -394,6 +446,9 @@ class Arbiter(Daemon):
 
         # Correct conf?
         self.conf.is_correct()
+
+        # Maybe some elements where not wrong, so we must clean if possible
+        self.conf.clean()
 
         # If the conf is not correct, we must get out now
         # if not self.conf.conf_is_correct:
@@ -411,7 +466,8 @@ class Arbiter(Daemon):
             logger.error(err)
             sys.exit(err)
 
-        logger.info('Things look okay - No serious problems were detected during the pre-flight check')
+        logger.info('Things look okay - No serious problems were detected '
+                    'during the pre-flight check')
 
         # Clean objects of temporary/unnecessary attributes for live work:
         self.conf.clean()
@@ -439,6 +495,12 @@ class Arbiter(Daemon):
         self.user = self.conf.shinken_user
         self.group = self.conf.shinken_group
         self.daemon_enabled = self.conf.daemon_enabled
+        self.daemon_thread_pool_size = self.conf.daemon_thread_pool_size
+        self.http_backend = getattr(self.conf, 'http_backend', 'auto')
+
+        self.accept_passive_unknown_check_results = BoolProp.pythonize(
+            getattr(self.me, 'accept_passive_unknown_check_results', '0')
+        )
 
         # If the user sets a workdir, lets use it. If not, use the
         # pidfile directory
@@ -446,11 +508,8 @@ class Arbiter(Daemon):
             self.workdir = os.path.abspath(os.path.dirname(self.pidfile))
         else:
             self.workdir = self.conf.workdir
-        #print "DBG curpath=", os.getcwd()
-        #print "DBG pidfile=", self.pidfile
-        #print "DBG workdir=", self.workdir
 
-        ##  We need to set self.host & self.port to be used by do_daemon_init_and_start
+        #  We need to set self.host & self.port to be used by do_daemon_init_and_start
         self.host = self.me.address
         self.port = self.me.port
 
@@ -458,13 +517,8 @@ class Arbiter(Daemon):
 
 
     def launch_analyse(self):
-        try:
-            import json
-        except ImportError:
-            logger.error("Error: json is need for statistics file saving. Please update your python version to 2.6")
-            sys.exit(2)
 
-        logger.info("We are doing an statistic analysis on the dump file" % self.analyse)
+        logger.info("We are doing an statistic analysis on the dump file %s", self.analyse)
         stats = {}
         types = ['hosts', 'services', 'contacts', 'timeperiods', 'commands', 'arbiters',
                  'schedulers', 'pollers', 'reactionners', 'brokers', 'receivers', 'modules',
@@ -473,24 +527,24 @@ class Arbiter(Daemon):
             lst = getattr(self.conf, t)
             nb = len([i for i in lst])
             stats['nb_' + t] = nb
-            logger.info("Got %s for %s" % (nb, t))
+            logger.info("Got %s for %s", nb, t)
 
         max_srv_by_host = max([len(h.services) for h in self.conf.hosts])
-        logger.info("Max srv by host" % max_srv_by_host)
+        logger.info("Max srv by host %s", max_srv_by_host)
         stats['max_srv_by_host'] = max_srv_by_host
 
         f = open(self.analyse, 'w')
         s = json.dumps(stats)
-        logger.info("Saving stats data to a file" % s)
+        logger.info("Saving stats data to a file %s", s)
         f.write(s)
         f.close()
 
 
     def go_migrate(self):
-        print "***********"*5
+        print "***********" * 5
         print "WARNING : this feature is NOT supported in this version!"
-        print "***********"*5
-        
+        print "***********" * 5
+
         migration_module_name = self.migrate.strip()
         mig_mod = self.conf.modules.find_by_name(migration_module_name)
         if not mig_mod:
@@ -506,7 +560,7 @@ class Arbiter(Daemon):
             print "Error during the initialization of the import module. Bailing out"
             sys.exit(2)
         print "Configuration migrating in progress..."
-        mod  = self.modules_manager.instances[0]
+        mod = self.modules_manager.instances[0]
         f = getattr(mod, 'import_objects', None)
         if not f or not callable(f):
             print "Import module is missing the import_objects function. Bailing out"
@@ -524,27 +578,33 @@ class Arbiter(Daemon):
             f(objs)
         # Ok we can exit now
         sys.exit(0)
-        
+
 
 
     # Main loop function
     def main(self):
         try:
+            # Setting log level
+            logger.setLevel('INFO')
+            # Force the debug level if the daemon is said to start with such level
+            if self.debug:
+                logger.setLevel('DEBUG')
+
             # Log will be broks
             for line in self.get_header():
                 logger.info(line)
 
             self.load_config_file()
-
+            logger.setLevel(self.log_level)
             # Maybe we are in a migration phase. If so, we will bailout here
             if self.migrate:
                 self.go_migrate()
-                
+
             # Look if we are enabled or not. If ok, start the daemon mode
             self.look_for_early_exit()
             self.do_daemon_init_and_start()
-            
-            self.uri_arb = self.pyro_daemon.register(self.interface, "ForArbiter")
+
+            self.uri_arb = self.http_daemon.register(self.interface)
 
             # ok we are now fully daemonized (if requested)
             # now we can start our "external" modules (if any):
@@ -553,17 +613,16 @@ class Arbiter(Daemon):
             # Ok now we can load the retention data
             self.hook_point('load_retention')
 
-            ## And go for the main loop
+            # And go for the main loop
             self.do_mainloop()
         except SystemExit, exp:
             # With a 2.4 interpreter the sys.exit() in load_config_file
             # ends up here and must be handled.
             sys.exit(exp.code)
         except Exception, exp:
-            logger.critical("I got an unrecoverable error. I have to exit")
-            logger.critical("You can log a bug ticket at https://github.com/naparuba/shinken/issues/new to get help")
-            logger.critical("Exception trace follows: %s" % (traceback.format_exc()))
+            self.print_unrecoverable(traceback.format_exc())
             raise
+
 
     def setup_new_conf(self):
         """ Setup a new conf received from a Master arbiter. """
@@ -595,7 +654,7 @@ class Arbiter(Daemon):
     # It can be used to get external commands for example
     def get_objects_from_from_queues(self):
         for f in self.modules_manager.get_external_from_queues():
-            #print "Groking from module instance %s" % f
+            # print "Groking from module instance %s" % f
             while True:
                 try:
                     o = f.get(block=False)
@@ -605,7 +664,7 @@ class Arbiter(Daemon):
                 # Maybe the queue had problems
                 # log it and quit it
                 except (IOError, EOFError), exp:
-                    logger.error("An external module queue got a problem '%s'" % str(exp))
+                    logger.error("An external module queue got a problem '%s'", str(exp))
                     break
 
 
@@ -620,7 +679,7 @@ class Arbiter(Daemon):
         for arb in self.conf.arbiters:
             if not arb.spare:
                 master_timeout = arb.check_interval * arb.max_check_attempts
-        logger.info("I'll wait master for %d seconds" % master_timeout)
+        logger.info("I'll wait master for %d seconds", master_timeout)
 
 
         while not self.interrupted:
@@ -643,7 +702,11 @@ class Arbiter(Daemon):
             # Now check if master is dead or not
             now = time.time()
             if now - self.last_master_speack > master_timeout:
-                logger.info("Arbiter Master is dead. The arbiter %s take the lead" % self.me.get_name())
+                logger.info("Arbiter Master is dead. The arbiter %s take the lead",
+                            self.me.get_name())
+                for arb in self.conf.arbiters:
+                    if not arb.spare:
+                        arb.alive = False
                 self.must_run = True
                 break
 
@@ -660,7 +723,7 @@ class Arbiter(Daemon):
         for sched in self.conf.schedulers:
             cmds = sched.external_commands
             if len(cmds) > 0 and sched.alive:
-                logger.debug("Sending %d commands to scheduler %s" % (len(cmds), sched.get_name()))
+                logger.debug("Sending %d commands to scheduler %s", len(cmds), sched.get_name())
                 sched.run_external_commands(cmds)
             # clean them
             sched.external_commands = []
@@ -705,7 +768,6 @@ class Arbiter(Daemon):
         timeout = 1.0
 
         while self.must_run and not self.interrupted:
-
             elapsed, ins, _ = self.handleRequests(timeout, suppl_socks)
 
             # If FIFO, read external command
@@ -742,11 +804,22 @@ class Arbiter(Daemon):
             self.check_and_log_tp_activation_change()
 
             # Now the dispatcher job
+            _t = time.time()
             self.dispatcher.check_alive()
+            statsmgr.incr('core.check-alive', time.time() - _t)
+
+            _t = time.time()
             self.dispatcher.check_dispatch()
+            statsmgr.incr('core.check-dispatch', time.time() - _t)
+
             # REF: doc/shinken-conf-dispatching.png (3)
+            _t = time.time()
             self.dispatcher.dispatch()
+            statsmgr.incr('core.dispatch', time.time() - _t)
+
+            _t = time.time()
             self.dispatcher.check_bad_dispatch()
+            statsmgr.incr('core.check-bad-dispatch', time.time() - _t)
 
             # Now get things from our module instances
             self.get_objects_from_from_queues()
@@ -758,14 +831,16 @@ class Arbiter(Daemon):
             # we must give him our broks
             self.push_broks_to_broker()
             self.get_external_commands_from_satellites()
-            #self.get_external_commands_from_receivers()
+            # self.get_external_commands_from_receivers()
             # send_conf_to_schedulers()
 
             if self.nb_broks_send != 0:
-                logger.debug("Nb Broks send: %d" % self.nb_broks_send)
+                logger.debug("Nb Broks send: %d", self.nb_broks_send)
             self.nb_broks_send = 0
 
+            _t = time.time()
             self.push_external_commands_to_schedulers()
+            statsmgr.incr('core.push-external-commands', time.time() - _t)
 
             # It's sent, do not keep them
             # TODO: check if really sent. Queue by scheduler?
@@ -798,3 +873,19 @@ class Arbiter(Daemon):
         external_commands = data['external_commands']
         self.broks.update(broks)
         self.external_commands.extend(external_commands)
+
+
+    # stats threads is asking us a main structure for stats
+    def get_stats_struct(self):
+        now = int(time.time())
+        # call the daemon one
+        res = super(Arbiter, self).get_stats_struct()
+        res.update({'name': self.me.get_name(), 'type': 'arbiter'})
+        res['hosts'] = len(self.conf.hosts)
+        res['services'] = len(self.conf.services)
+        metrics = res['metrics']
+        # metrics specific
+        metrics.append('arbiter.%s.external-commands.queue %d %d' %
+                       (self.me.get_name(), len(self.external_commands), now))
+
+        return res

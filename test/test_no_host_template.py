@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (C) 2009-2010:
+# Copyright (C) 2009-2014:
 #    Gabes Jean, naparuba@gmail.com
 #    Gerhard Lausser, Gerhard.Lausser@consol.de
 #
@@ -28,7 +28,7 @@ from shinken_test import *
 class TestNoHostTemplate(ShinkenTest):
 
     def setUp(self):
-        self.setup_with_file('etc/nagios_no_host_template.cfg')
+        self.setup_with_file('etc/shinken_no_host_template.cfg')
 
     def test_host_without_a_template(self):
         #
@@ -39,7 +39,7 @@ class TestNoHostTemplate(ShinkenTest):
         now = time.time()
         host = self.sched.hosts.find_by_name("my_host")
         b = host.is_correct()
-        self.assert_(b)
+        self.assertTrue(b)
 
 
 if __name__ == '__main__':

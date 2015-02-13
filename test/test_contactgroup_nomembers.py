@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (C) 2009-2010:
+# Copyright (C) 2009-2014:
 #    Gabes Jean, naparuba@gmail.com
 #    Gerhard Lausser, Gerhard.Lausser@consol.de
 #
@@ -28,16 +28,16 @@ from shinken_test import *
 class TestContactgroupWitoutMembers(ShinkenTest):
 
     def setUp(self):
-        self.setup_with_file('etc/nagios_contactgroup_nomembers.cfg')
+        self.setup_with_file('etc/shinken_contactgroup_nomembers.cfg')
 
     # It seems that a contact group with no member cause some crash for the arbiter.
     # should fix it :)
     def test_contactgroup_nomember(self):
         # Look for the members of the test_contact_nomember
         cg = self.sched.conf.contactgroups.find_by_name('test_contact_nomember')
-        self.assert_(cg is not None)
+        self.assertIsNot(cg, None)
         print cg.members
-        self.assert_(cg.members == [])
+        self.assertEqual([], cg.members)
 
 
 if __name__ == '__main__':

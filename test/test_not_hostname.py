@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (C) 2009-2010:
+# Copyright (C) 2009-2014:
 #    Gabes Jean, naparuba@gmail.com
 #    Gerhard Lausser, Gerhard.Lausser@consol.de
 #
@@ -30,7 +30,7 @@ from shinken_test import unittest, ShinkenTest
 class TestConfig(ShinkenTest):
 
     def setUp(self):
-        self.setup_with_file('etc/nagios_not_hostname.cfg')
+        self.setup_with_file('etc/shinken_not_hostname.cfg')
 
     def test_not_hostname_in_service(self):
         # The service is apply with a host_group on "test_host_0","test_host_1"
@@ -49,9 +49,9 @@ class TestConfig(ShinkenTest):
         svc.act_depend_of = []  # no hostchecks on critical checkresults
         svc_not = self.sched.services.find_srv_by_name_and_hostname("test_host_1", "test_ok_0")
         # Check if the service for the good host is here
-        self.assert_(svc is not None)
+        self.assertIsNot(svc, None)
         # check if the service for the not one (!) is not here
-        self.assert_(svc_not is None)
+        self.assertIs(None, svc_not)
 
 
 

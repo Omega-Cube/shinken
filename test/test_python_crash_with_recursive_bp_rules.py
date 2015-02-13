@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (C) 2009-2010:
+# Copyright (C) 2009-2014:
 #    Gabes Jean, naparuba@gmail.com
 #    Gerhard Lausser, Gerhard.Lausser@consol.de
 #
@@ -28,7 +28,7 @@ from shinken_test import *
 class TestConfig(ShinkenTest):
 
     def setUp(self):
-        self.setup_with_file('etc/nagios_python_crash_with_recursive_bp_rules.cfg')
+        self.setup_with_file('etc/shinken_python_crash_with_recursive_bp_rules.cfg')
 
     def test_dummy(self):
         #

@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (C) 2009-2010:
+# Copyright (C) 2009-2014:
 #    Gabes Jean, naparuba@gmail.com
 #    Gerhard Lausser, Gerhard.Lausser@consol.de
 #
@@ -28,7 +28,7 @@ from shinken_test import *
 class TestHostDepWithNodepname(ShinkenTest):
 
     def setUp(self):
-        self.setup_with_file('etc/nagios_hostdep_withno_depname.cfg')
+        self.setup_with_file('etc/shinken_hostdep_withno_depname.cfg')
 
     def test_hostdep_withno_depname(self):
         #
@@ -39,13 +39,13 @@ class TestHostDepWithNodepname(ShinkenTest):
         now = time.time()
         host = self.sched.hosts.find_by_name("test_host_0")
         h2 = self.sched.hosts.find_by_name("test_host_1")
-        self.assert_(h2 is not None)
+        self.assertIsNot(h2, None)
         # Should got a link between host and h2
         print h2.act_depend_of
-        self.assert_(len(h2.act_depend_of) > 0)
+        self.assertGreater(len(h2.act_depend_of), 0)
         l = h2.act_depend_of[0]
         h = l[0]  # the host that h2 depend on
-        self.assert_(h is host)
+        self.assertIs(host, h)
 
 if __name__ == '__main__':
     unittest.main()

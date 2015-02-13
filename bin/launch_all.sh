@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# Copyright (C) 2009-2012:
+# Copyright (C) 2009-2014:
 #    Gabes Jean, naparuba@gmail.com
 #    Gerhard Lausser, Gerhard.Lausser@consol.de
 #    Gregory Starck, g.starck@gmail.com
@@ -25,11 +25,14 @@
 DIR="$(cd $(dirname "$0"); pwd)"
 echo "Going to dir $DIR"
 
+# Prepare the launch by cleaning var/log directories
+. $DIR/preparedev
+
+
 cd "$DIR"/..
 
 export LANG=us_US.UTF-8
 
-"$DIR"/launch_skonf.sh
 "$DIR"/launch_scheduler.sh
 "$DIR"/launch_poller.sh
 "$DIR"/launch_reactionner.sh

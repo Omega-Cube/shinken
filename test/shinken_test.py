@@ -5,13 +5,20 @@
 #
 
 import sys
+from sys import __stdout__
+from functools import partial
+
 import time
 import datetime
 import os
 import string
 import re
 import random
-import unittest
+import copy
+import locale
+
+import unittest2 as unittest
+
 
 # import the shinken library from the parent directory
 import __import_shinken ; del __import_shinken
@@ -23,86 +30,156 @@ from shinken.objects.module import Module
 
 from shinken.dispatcher import Dispatcher
 from shinken.log import logger
+from shinken.modulesctx import modulesctx
 from shinken.scheduler import Scheduler
 from shinken.macroresolver import MacroResolver
 from shinken.external_command import ExternalCommandManager, ExternalCommand
 from shinken.check import Check
 from shinken.message import Message
-from shinken.arbiterlink import ArbiterLink
-from shinken.schedulerlink import SchedulerLink
-from shinken.pollerlink import PollerLink
-from shinken.reactionnerlink import ReactionnerLink
-from shinken.brokerlink import BrokerLink
-from shinken.satellitelink import SatelliteLink
+from shinken.objects.arbiterlink import ArbiterLink
+from shinken.objects.schedulerlink import SchedulerLink
+from shinken.objects.pollerlink import PollerLink
+from shinken.objects.reactionnerlink import ReactionnerLink
+from shinken.objects.brokerlink import BrokerLink
+from shinken.objects.satellitelink import SatelliteLink
 from shinken.notification import Notification
 from shinken.modulesmanager import ModulesManager
 from shinken.basemodule import BaseModule
 
 from shinken.brok import Brok
+from shinken.misc.common import DICT_MODATTR
 
 from shinken.daemons.schedulerdaemon import Shinken
 from shinken.daemons.brokerdaemon import Broker
 from shinken.daemons.arbiterdaemon import Arbiter
+from shinken.daemons.receiverdaemon import Receiver
+from logging import ERROR
 
-from shinken.modules import livestatus_broker
-from shinken.modules.livestatus_broker import LiveStatus_broker
-from shinken.modules.livestatus_broker.livestatus import LiveStatus
-from shinken.modules.livestatus_broker.livestatus_regenerator import LiveStatusRegenerator
-from shinken.modules.livestatus_broker.livestatus_query_cache import LiveStatusQueryCache
-from shinken.misc.datamanager import datamgr
+# Modules are by default on the ../modules
+myself = os.path.abspath(__file__)
 
-livestatus_modconf = Module()
-livestatus_modconf.module_name = "livestatus"
-livestatus_modconf.module_type = livestatus_broker.properties['type']
-livestatus_modconf.properties = livestatus_broker.properties.copy()
+modules_dir = os.environ.get('SHINKEN_MODULES_DIR', "modules")
+
+
+class __DUMMY:
+    def add(self, obj):
+        pass
+
+logger.load_obj(__DUMMY())
+logger.setLevel(ERROR)
+
+#############################################################################
+
+def guess_sys_stdout_encoding():
+    ''' Return the best guessed encoding to be used for printing on sys.stdout. '''
+    return (
+           getattr(sys.stdout, 'encoding', None)
+        or getattr(__stdout__, 'encoding', None)
+        or locale.getpreferredencoding()
+        or sys.getdefaultencoding()
+        or 'ascii'
+    )
+
+
+
+def safe_print(*args, **kw):
+    """" "print" args to sys.stdout,
+    If some of the args aren't unicode then convert them first to unicode,
+        using keyword argument 'in_encoding' if provided (else default to UTF8)
+        and replacing bad encoded bytes.
+    Write to stdout using 'out_encoding' if provided else best guessed encoding,
+        doing xmlcharrefreplace on errors.
+    """
+    in_bytes_encoding = kw.pop('in_encoding', 'UTF-8')
+    out_encoding = kw.pop('out_encoding', guess_sys_stdout_encoding())
+    if kw:
+        raise ValueError('unhandled named/keyword argument(s): %r' % kw)
+    #
+    make_in_data_gen = lambda: ( a if isinstance(a, unicode)
+                                else
+                            unicode(str(a), in_bytes_encoding, 'replace')
+                        for a in args )
+
+    possible_codings = ( out_encoding, )
+    if out_encoding != 'ascii':
+        possible_codings += ( 'ascii', )
+
+    for coding in possible_codings:
+        data = u' '.join(make_in_data_gen()).encode(coding, 'xmlcharrefreplace')
+        try:
+            sys.stdout.write(data)
+            break
+        except UnicodeError as err:
+            # there might still have some problem with the underlying sys.stdout.
+            # it might be a StringIO whose content could be decoded/encoded in this same process
+            # and have encode/decode errors because we could have guessed a bad encoding with it.
+            # in such case fallback on 'ascii'
+            if coding == 'ascii':
+                raise
+            sys.stderr.write('Error on write to sys.stdout with %s encoding: err=%s\nTrying with ascii' % (
+                coding, err))
+    sys.stdout.write(b'\n')
+
+
+
+#############################################################################
 
 # We overwrite the functions time() and sleep()
 # This way we can modify sleep() so that it immediately returns although
 # for a following time() it looks like thee was actually a delay.
 # This massively speeds up the tests.
+class TimeHacker(object):
 
-time.my_offset = 0
-time.my_starttime = time.time()
-time.my_oldtime = time.time
+    def __init__(self):
+        self.my_offset = 0
+        self.my_starttime = time.time()
+        self.my_oldtime = time.time
+        self.original_time_time = time.time
+        self.original_time_sleep = time.sleep
+        self.in_real_time = True
 
+    def my_time_time(self):
+        return self.my_oldtime() + self.my_offset
 
-def my_time_time():
-    now = time.my_oldtime() + time.my_offset
-    return now
+    def my_time_sleep(self, delay):
+        self.my_offset += delay
 
-original_time_time = time.time
-time.time = my_time_time
+    def time_warp(self, duration):
+        self.my_offset += duration
 
-
-def my_time_sleep(delay):
-    time.my_offset += delay
-
-original_time_sleep = time.sleep
-time.sleep = my_time_sleep
-
-
-def time_warp(duration):
-    time.my_offset += duration
+    def set_my_time(self):
+        if self.in_real_time:
+            time.time = self.my_time_time
+            time.sleep = self.my_time_sleep
+            self.in_real_time = False
 
 # If external processes or time stamps for files are involved, we must
 # revert the fake timing routines, because these externals cannot be fooled.
 # They get their times from the operating system.
-# In this case we write the following lines in the test files:
-#
-# from shinken_test import *
-# # we have an external process, so we must un-fake time functions
-# time.time = original_time_time
-# time.sleep = original_time_sleep
+    def set_real_time(self):
+        if not self.in_real_time:
+            time.time = self.original_time_time
+            time.sleep = self.original_time_sleep
+            self.in_real_time = True
+
+
+#Time hacking for every test!
+time_hacker = TimeHacker()
+time_hacker.set_my_time()
+
 
 class Pluginconf(object):
     pass
 
 
+
 class ShinkenTest(unittest.TestCase):
     def setUp(self):
-        self.setup_with_file('etc/nagios_1r_1h_1s.cfg')
+        self.setup_with_file('etc/shinken_1r_1h_1s.cfg')
 
     def setup_with_file(self, path):
+        time_hacker.set_my_time()
+        self.print_header()
         # i am arbiter-like
         self.broks = {}
         self.me = None
@@ -116,25 +193,24 @@ class ShinkenTest(unittest.TestCase):
         self.conf.create_objects_for_type(raw_objects, 'module')
         self.conf.early_arbiter_linking()
         self.conf.create_objects(raw_objects)
-        self.conf.old_properties_names_to_new()
         self.conf.instance_id = 0
         self.conf.instance_name = 'test'
         # Hack push_flavor, that is set by the dispatcher
         self.conf.push_flavor = 0
         self.conf.load_triggers()
+        #import pdb;pdb.set_trace()
         self.conf.linkify_templates()
+        #import pdb;pdb.set_trace()
         self.conf.apply_inheritance()
+        #import pdb;pdb.set_trace()
         self.conf.explode()
         #print "Aconf.services has %d elements" % len(self.conf.services)
-        self.conf.create_reversed_list()
-        self.conf.remove_twins()
         self.conf.apply_implicit_inheritance()
         self.conf.fill_default()
         self.conf.remove_templates()
         self.conf.compute_hash()
         #print "conf.services has %d elements" % len(self.conf.services)
-        self.conf.create_reversed_list()
-        self.conf.pythonize()
+        self.conf.override_properties()
         self.conf.linkify()
         self.conf.apply_dependencies()
         self.conf.explode_global_conf()
@@ -144,18 +220,22 @@ class ShinkenTest(unittest.TestCase):
         self.conf.is_correct()
         if not self.conf.conf_is_correct:
             print "The conf is not correct, I stop here"
+            self.conf.dump()
             return
+        self.conf.clean()
 
         self.confs = self.conf.cut_into_parts()
         self.conf.prepare_for_sending()
         self.conf.show_errors()
         self.dispatcher = Dispatcher(self.conf, self.me)
 
-        scheddaemon = Shinken(None, False, False, False, None)
-        self.sched = Scheduler(scheddaemon)
-
-        scheddaemon.sched = self.sched
-
+        scheddaemon = Shinken(None, False, False, False, None, None)
+        self.scheddaemon = scheddaemon
+        self.sched = scheddaemon.sched
+        scheddaemon.modules_dir = modules_dir
+        scheddaemon.load_modules_manager()
+        # Remember to clean the logs we just created before launching tests
+        self.clear_logs()
         m = MacroResolver()
         m.init(self.conf)
         self.sched.load_conf(self.conf, in_test=True)
@@ -165,6 +245,7 @@ class ShinkenTest(unittest.TestCase):
         e2 = ExternalCommandManager(self.conf, 'dispatcher')
         e2.load_arbiter(self)
         self.external_command_dispatcher = e2
+        self.sched.conf.accept_passive_unknown_check_results = False
 
         self.sched.schedule()
 
@@ -184,6 +265,12 @@ class ShinkenTest(unittest.TestCase):
         #check = ref.actions.pop()
         check = ref.checks_in_progress[0]
         self.sched.add(check)  # check is now in sched.checks[]
+
+        # Allows to force check scheduling without setting its status nor
+        # output. Useful for manual business rules rescheduling, for instance.
+        if exit_status is None:
+            return
+
         # fake execution
         check.check_time = now
 
@@ -199,21 +286,25 @@ class ShinkenTest(unittest.TestCase):
         check.status = 'waitconsume'
         self.sched.waiting_results.append(check)
 
-    def scheduler_loop(self, count, reflist, do_sleep=False, sleep_time=61):
+
+    def scheduler_loop(self, count, reflist, do_sleep=False, sleep_time=61, verbose=True):
         for ref in reflist:
             (obj, exit_status, output) = ref
             obj.checks_in_progress = []
         for loop in range(1, count + 1):
-            print "processing check", loop
+            if verbose is True:
+                print "processing check", loop
             for ref in reflist:
                 (obj, exit_status, output) = ref
                 obj.update_in_checking()
                 self.fake_check(obj, exit_status, output)
             self.sched.manage_internal_checks()
+
             self.sched.consume_results()
             self.sched.get_new_actions()
             self.sched.get_new_broks()
-            self.worker_loop()
+            self.sched.scatter_master_notifications()
+            self.worker_loop(verbose)
             for ref in reflist:
                 (obj, exit_status, output) = ref
                 obj.checks_in_progress = []
@@ -222,7 +313,8 @@ class ShinkenTest(unittest.TestCase):
             if do_sleep:
                 time.sleep(sleep_time)
 
-    def worker_loop(self):
+
+    def worker_loop(self, verbose=True):
         self.sched.delete_zombie_checks()
         self.sched.delete_zombie_actions()
         checks = self.sched.get_to_run_checks(True, False, worker_name='tester')
@@ -230,27 +322,40 @@ class ShinkenTest(unittest.TestCase):
         #print "------------ worker loop checks ----------------"
         #print checks
         #print "------------ worker loop actions ----------------"
-        self.show_actions()
+        if verbose is True:
+            self.show_actions()
         #print "------------ worker loop new ----------------"
         for a in actions:
             a.status = 'inpoller'
             a.check_time = time.time()
             a.exit_status = 0
             self.sched.put_results(a)
-        self.show_actions()
+        if verbose is True:
+            self.show_actions()
         #print "------------ worker loop end ----------------"
+
 
     def show_logs(self):
         print "--- logs <<<----------------------------------"
-        for brok in sorted(self.sched.broks.values(), lambda x, y: x.id - y.id):
+        if hasattr(self, "sched"):
+            broks = self.sched.broks
+        else:
+            broks = self.broks
+        for brok in sorted(broks.values(), lambda x, y: x.id - y.id):
             if brok.type == 'log':
                 brok.prepare()
-                print "LOG:", brok.data['log']
+                safe_print("LOG: ", brok.data['log'])
+
         print "--- logs >>>----------------------------------"
+
 
     def show_actions(self):
         print "--- actions <<<----------------------------------"
-        for a in sorted(self.sched.actions.values(), lambda x, y: x.id - y.id):
+        if hasattr(self, "sched"):
+            actions = self.sched.actions
+        else:
+            actions = self.actions
+        for a in sorted(actions.values(), lambda x, y: x.id - y.id):
             if a.is_a == 'notification':
                 if a.ref.my_type == "host":
                     ref = "host: %s" % a.ref.get_name()
@@ -261,55 +366,99 @@ class ShinkenTest(unittest.TestCase):
                 print "EVENTHANDLER:", a
         print "--- actions >>>----------------------------------"
 
+
     def show_and_clear_logs(self):
         self.show_logs()
         self.clear_logs()
+
 
     def show_and_clear_actions(self):
         self.show_actions()
         self.clear_actions()
 
+
     def count_logs(self):
-        return len([b for b in self.sched.broks.values() if b.type == 'log'])
+        if hasattr(self, "sched"):
+            broks = self.sched.broks
+        else:
+            broks = self.broks
+        return len([b for b in broks.values() if b.type == 'log'])
+
 
     def count_actions(self):
-        return len(self.sched.actions.values())
+        if hasattr(self, "sched"):
+            actions = self.sched.actions
+        else:
+            actions = self.actions
+        return len(actions.values())
+
 
     def clear_logs(self):
+        if hasattr(self, "sched"):
+            broks = self.sched.broks
+        else:
+            broks = self.broks
         id_to_del = []
-        for b in self.sched.broks.values():
+        for b in broks.values():
             if b.type == 'log':
                 id_to_del.append(b.id)
         for id in id_to_del:
-            del self.sched.broks[id]
+            del broks[id]
+
 
     def clear_actions(self):
-        self.sched.actions = {}
-
-    def log_match(self, index, pattern):
-        # log messages are counted 1...n, so index=1 for the first message
-        if index > self.count_logs():
-            return False
+        if hasattr(self, "sched"):
+            self.sched.actions = {}
         else:
-            regex = re.compile(pattern)
-            lognum = 1
-            for brok in sorted(self.sched.broks.values(), lambda x, y: x.id - y.id):
-                if brok.type == 'log':
-                    brok.prepare()
-                    if index == lognum:
-                        if re.search(regex, brok.data['log']):
-                            return True
-                    lognum += 1
-        return False
+            self.actions = {}
 
-    def any_log_match(self, pattern):
+
+    def assert_log_match(self, index, pattern, no_match=False):
+        # log messages are counted 1...n, so index=1 for the first message
+        if not no_match:
+            self.assertGreaterEqual(self.count_logs(), index)
         regex = re.compile(pattern)
-        for brok in sorted(self.sched.broks.values(), lambda x, y: x.id - y.id):
+        lognum = 1
+        broks = sorted(self.sched.broks.values(), lambda x, y: x.id - y.id)
+        for brok in broks:
+            if brok.type == 'log':
+                brok.prepare()
+                if index == lognum:
+                    if re.search(regex, brok.data['log']):
+                        return
+                lognum += 1
+        self.assertTrue(no_match, "%s found a matched log line in broks :\n"
+                               "index=%s pattern=%r\n"
+                               "broks=%r" % (
+            '*HAVE*' if no_match else 'Not',
+            index, pattern, broks
+        ))
+
+
+    def _any_log_match(self, pattern, assert_not):
+        regex = re.compile(pattern)
+        broks = getattr(self, 'sched', self).broks
+        broks = sorted(broks.values(), lambda x, y: x.id - y.id)
+        for brok in broks:
             if brok.type == 'log':
                 brok.prepare()
                 if re.search(regex, brok.data['log']):
-                    return True
-        return False
+                    self.assertTrue(not assert_not,
+                                    "Found matching log line:\n"
+                                    "pattern = %r\nbrok log = %r" % (pattern, brok.data['log'])
+                    )
+                    return
+        self.assertTrue(assert_not,
+            "No matching log line found:\n"
+            "pattern = %r\n" "broks = %r" % (pattern, broks)
+        )
+
+    def assert_any_log_match(self, pattern):
+        self._any_log_match(pattern, assert_not=False)
+
+    def assert_no_log_match(self, pattern):
+        self._any_log_match(pattern, assert_not=True)
+
 
     def get_log_match(self, pattern):
         regex = re.compile(pattern)
@@ -321,125 +470,17 @@ class ShinkenTest(unittest.TestCase):
         return res
 
     def print_header(self):
-        print "#" * 80 + "\n" + "#" + " " * 78 + "#"
+        print "\n" + "#" * 80 + "\n" + "#" + " " * 78 + "#"
         print "#" + string.center(self.id(), 78) + "#"
         print "#" + " " * 78 + "#\n" + "#" * 80 + "\n"
 
     def xtest_conf_is_correct(self):
         self.print_header()
-        self.assert_(self.conf.conf_is_correct)
-
-    def find_modules_path(self):
-        """ Find the absolute path of the shinken module directory and returns it.  """
-        import shinken
-
-        # BEWARE: this way of finding path is good if we still
-        # DO NOT HAVE CHANGE PWD!!!
-        # Now get the module path. It's in fact the directory modules
-        # inside the shinken directory. So let's find it.
-
-        print "modulemanager file", shinken.modulesmanager.__file__
-        modulespath = os.path.abspath(shinken.modulesmanager.__file__)
-        print "modulemanager absolute file", modulespath
-        # We got one of the files of
-        parent_path = os.path.dirname(os.path.dirname(modulespath))
-        modulespath = os.path.join(parent_path, 'shinken', 'modules')
-        print("Using modules path: %s" % (modulespath))
-
-        return modulespath
-
-    def do_load_modules(self):
-        self.modules_manager.load_and_init()
-        self.log.log("I correctly loaded the modules: [%s]" % (','.join([inst.get_name() for inst in self.modules_manager.instances])))
-
-    def init_livestatus(self, modconf=None):
-        self.livelogs = 'tmp/livelogs.db' + self.testid
-
-        if modconf is None:
-            modconf = Module({'module_name': 'LiveStatus',
-                'module_type': 'livestatus',
-                'port': str(50000 + os.getpid()),
-                'pnp_path': 'tmp/pnp4nagios_test' + self.testid,
-                'host': '127.0.0.1',
-                'socket': 'live',
-                'name': 'test', #?
-            })
-
-        dbmodconf = Module({'module_name': 'LogStore',
-            'module_type': 'logstore_sqlite',
-            'use_aggressive_sql': "0",
-            'database_file': self.livelogs,
-            'archive_path': os.path.join(os.path.dirname(self.livelogs), 'archives'),
-        })
-        modconf.modules = [dbmodconf]
-        self.livestatus_broker = LiveStatus_broker(modconf)
-        self.livestatus_broker.create_queues()
-
-        #--- livestatus_broker.main
-        self.livestatus_broker.log = logger
-        # this seems to damage the logger so that the scheduler can't use it
-        #self.livestatus_broker.log.load_obj(self.livestatus_broker)
-        self.livestatus_broker.debug_output = []
-        self.livestatus_broker.modules_manager = ModulesManager('livestatus', self.livestatus_broker.find_modules_path(), [])
-        self.livestatus_broker.modules_manager.set_modules(self.livestatus_broker.modules)
-        # We can now output some previouly silented debug ouput
-        self.livestatus_broker.do_load_modules()
-        for inst in self.livestatus_broker.modules_manager.instances:
-            if inst.properties["type"].startswith('logstore'):
-                f = getattr(inst, 'load', None)
-                if f and callable(f):
-                    f(self.livestatus_broker)  # !!! NOT self here !!!!
-                break
-        for s in self.livestatus_broker.debug_output:
-            print "errors during load", s
-        del self.livestatus_broker.debug_output
-        self.livestatus_broker.rg = LiveStatusRegenerator()
-        self.livestatus_broker.datamgr = datamgr
-        datamgr.load(self.livestatus_broker.rg)
-        self.livestatus_broker.query_cache = LiveStatusQueryCache()
-        self.livestatus_broker.query_cache.disable()
-        self.livestatus_broker.rg.register_cache(self.livestatus_broker.query_cache)
-        #--- livestatus_broker.main
-
-        self.livestatus_broker.init()
-        self.livestatus_broker.db = self.livestatus_broker.modules_manager.instances[0]
-        self.livestatus_broker.livestatus = LiveStatus(self.livestatus_broker.datamgr, self.livestatus_broker.query_cache, self.livestatus_broker.db, self.livestatus_broker.pnp_path, self.livestatus_broker.from_q)
-
-        #--- livestatus_broker.do_main
-        self.livestatus_broker.db.open()
-        #--- livestatus_broker.do_main
+        self.assertTrue(self.conf.conf_is_correct)
 
 
-# Hook for old python some test
-if not hasattr(ShinkenTest, 'assertNotIn'):
-    def assertNotIn(self, member, container, msg=None):
-       self.assertTrue(member not in container)
-    ShinkenTest.assertNotIn = assertNotIn
-        
 
-if not hasattr(ShinkenTest, 'assertIn'):
-    def assertIn(self, member, container, msg=None):
-        self.assertTrue(member in container)
-    ShinkenTest.assertIn = assertIn
 
-if not hasattr(ShinkenTest, 'assertIsInstance'):
-    def assertIsInstance(self, obj, cls, msg=None):
-        self.assertTrue(isinstance(obj, cls))
-    ShinkenTest.assertIsInstance = assertIsInstance
-                    
-
-if not hasattr(ShinkenTest, 'assertRegexpMatches'):
-    def assertRegexpMatches(self, line, patern):
-        r = re.search(patern, line)
-        self.assertTrue(r is not None)
-    ShinkenTest.assertRegexpMatches = assertRegexpMatches
-                    
-
-if not hasattr(ShinkenTest, 'assertIs'):
-    def assertIs(self, obj, cmp, msg=None):
-        self.assertTrue(obj is cmp)
-    ShinkenTest.assertIs = assertIs
-                            
 
 if __name__ == '__main__':
     unittest.main()

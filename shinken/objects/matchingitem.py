@@ -2,7 +2,7 @@
 
 # -*- coding: utf-8 -*-
 
-# Copyright (C) 2009-2012:
+# Copyright (C) 2009-2014:
 #    Gabes Jean, naparuba@gmail.com
 #    Gerhard Lausser, Gerhard.Lausser@consol.de
 #    Gregory Starck, g.starck@gmail.com
@@ -59,9 +59,15 @@ class MatchingItem(Item):
         values = value.split(',')
         for m in matchings:
             for v in values:
-                #print "Try to match", m, v
-                if re.search(m, v):
-                    return True
+                print "Try to match", m, v
+                # Maybe m is a list, if so should check one values
+                if isinstance(m, list):
+                    for _m in m:
+                        if re.search(_m, v):
+                            return True
+                else:
+                    if re.search(m, v):
+                        return True
         return False
 
     # Look if we match all discovery data or not
@@ -74,37 +80,37 @@ class MatchingItem(Item):
         # First we look if it's possible to match
         # we must match All self.matches things
         for m in self.matches:
-            #print "Compare to", m
+            # print "Compare to", m
             match_one = False
             for (k, v) in datas.iteritems():
                 # We found at least one of our match key
                 if m == k:
                     if self.is_matching(k, v):
-                        #print "Got matching with", m, k, v
+                        # print "Got matching with", m, k, v
                         match_one = True
                         continue
             if not match_one:
                 # It match none
-                #print "Match none, False"
+                # print "Match none, False"
                 return False
-        #print "It's possible to be OK"
+        # print "It's possible to be OK"
 
         # And now look if ANY of not_matches is reach. If so
         # it's False
         for m in self.not_matches:
-            #print "Compare to NOT", m
+            # print "Compare to NOT", m
             match_one = False
             for (k, v) in datas.iteritems():
-                #print "K,V", k,v
+                # print "K,V", k,v
                 # We found at least one of our match key
                 if m == k:
-                    #print "Go loop"
+                    # print "Go loop"
                     if self.is_matching(k, v, look_in='not_matches'):
-                        #print "Got matching with", m, k, v
+                        # print "Got matching with", m, k, v
                         match_one = True
                         continue
             if match_one:
-                #print "I match one, I quit"
+                # print "I match one, I quit"
                 return False
 
         # Ok we match ALL rules in self.matches

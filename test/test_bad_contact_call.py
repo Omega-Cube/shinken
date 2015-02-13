@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (C) 2009-2010:
+# Copyright (C) 2009-2014:
 #    Gabes Jean, naparuba@gmail.com
 #    Gerhard Lausser, Gerhard.Lausser@consol.de
 #
@@ -28,13 +28,13 @@ from shinken_test import *
 class TestConfig(ShinkenTest):
 
     def setUp(self):
-        self.setup_with_file('etc/nagios_bad_contact_call.cfg')
+        self.setup_with_file('etc/shinken_bad_contact_call.cfg')
 
     def test_bad_contact_call(self):
         # The service got a unknow contact. It should raise an error
         svc = self.conf.services.find_srv_by_name_and_hostname("test_host_0", "test_ok_0")
         print "Contacts:", svc.contacts
-        self.assert_(svc.is_correct() == False)
+        self.assertEqual(False, svc.is_correct())
 
 
 if __name__ == '__main__':

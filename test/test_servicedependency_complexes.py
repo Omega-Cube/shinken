@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (C) 2009-2010:
+# Copyright (C) 2009-2014:
 #    Gabes Jean, naparuba@gmail.com
 #    Gerhard Lausser, Gerhard.Lausser@consol.de
 #
@@ -28,7 +28,7 @@ from shinken_test import *
 class TestConfig(ShinkenTest):
 
     def setUp(self):
-        self.setup_with_file('etc/nagios_servicedependency_complexes.cfg')
+        self.setup_with_file('etc/shinken_servicedependency_complexes.cfg')
 
     def test_dummy(self):
         #
@@ -38,11 +38,11 @@ class TestConfig(ShinkenTest):
         for s in self.sched.services:
             print s.get_full_name()
         NRPE = self.sched.services.find_srv_by_name_and_hostname("myspecifichost", "NRPE")
-        self.assert_(NRPE is not None)
+        self.assertIsNot(NRPE, None)
         Load = self.sched.services.find_srv_by_name_and_hostname("myspecifichost", "Load")
-        self.assert_(Load is not None)
+        self.assertIsNot(Load, None)
         print Load.act_depend_of
-        self.assert_(NRPE in [e[0] for e in Load.act_depend_of])
+        self.assertIn(NRPE, [e[0] for e in Load.act_depend_of])
 
 
 if __name__ == '__main__':

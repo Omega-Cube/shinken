@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# Copyright (C) 2009-2011:
+# Copyright (C) 2009-2014:
 #    Gabes Jean, naparuba@gmail.com
 #    Gerhard Lausser, Gerhard.Lausser@consol.de
 #    Gregory Starck, g.starck@gmail.com
@@ -23,10 +23,10 @@
 
 ### BEGIN INIT INFO
 # Provides:          shinken
-# Required-Start:    $local_fs
-# Required-Stop:     $local_fs
+# Required-Start:    $network $remote_fs
+# Required-Stop:     $network $remote_fs
 # Default-Start:     2 3 4 5
-# Default-Stop:      S 0 1 6
+# Default-Stop:      0 1 6
 # Short-Description: Shinken monitoring daemon
 # Description:       Shinken is a monitoring tool composed of many separated modules:
 #     - arbiter     : the main one : control everything else.
@@ -37,13 +37,18 @@
 #     - receiver    : manage all passive data
 ### END INIT INFO
 
-# Deadlink :(
-# http://refspecs.freestandards.org/LSB_3.1.1/LSB-Core-generic/LSB-Core-generic/iniscrptact.html
+### Chkconfig Header
+# Shinken        Starts Shinken daemons
+#
+# chkconfig: 345 99 01
+# description: Start Shinken daemons
+
+# Reference:
+# http://refspecs.linuxfoundation.org/LSB_4.1.0/LSB-Core-generic/LSB-Core-generic/iniscrptact.html
 
 
 NAME="shinken"
 
-## If you want to give a test to the BETA skonf tool, you can add skonf to the list below
 AVAIL_MODULES="scheduler poller reactionner broker receiver arbiter"
 
 ## SHINKEN_MODULE_FILE is set by shinken-* if it's one of these that's calling us.
@@ -64,7 +69,10 @@ test "$ETC" || ETC=$(cd $curpath/../../etc && pwd)
 
 export PATH="${PATH:+$PATH:}/usr/sbin:/bin:/sbin"
 export LANG=en_US.UTF8
+export LC_ALL=en_US.UTF8
 export PYTHONIOENCODING=utf8
+export PYTHONUNBUFFERED="0"
+export TZ=:/etc/localtime
 
 # We try to find the LAST possible Python VERSION
 pythonver() {
@@ -121,7 +129,7 @@ SUBMODULES=""
 
 usage() {
     cat << END
-Usage: $SCRIPTNAME [ -d ] {start|stop|restart|status|check} $_usage_mods_
+Usage: $SCRIPTNAME [ -d ] {start|stop|status|restart|reload|force-reload|check} $_usage_mods_
 
  -d  start requested module(s) in debug mode, only useful with start|restart
 
@@ -142,6 +150,9 @@ CMD=$1
 shift
 SUBMODULES=$*
 
+# Reads configuration variable file if it is present
+[ -r "$SHINKEN_DEFAULT_FILE" ] && . "$SHINKEN_DEFAULT_FILE"
+
 if [ -z "$SUBMODULES" ]; then
     SUBMODULES=$AVAIL_MODULES
 else
@@ -155,19 +166,10 @@ else
     done
 fi
 
-
-# Reads configuration variable file if it is present
-[ -r "$SHINKEN_DEFAULT_FILE" ] && . "$SHINKEN_DEFAULT_FILE"
-
-
 # Now look if some required variables are pre defined:
 if ! test "$SHINKENCFG"
 then
-    SHINKENCFG="$ETC/nagios.cfg"
-fi
-if ! test "$SHINKENSPECIFICCFG"
-then
-    SHINKENSPECIFICCFG="$ETC/shinken-specific.cfg"
+    SHINKENCFG="$ETC/shinken.cfg"
 fi
 
 # If var or run dir is missing, create them and chown them
@@ -281,19 +283,23 @@ do_start() {
     mod=$1
     modfilepath="$BIN/shinken-${mod}"
     [ -e "$modfilepath" ] || {
-        log_failure_msg "FAILED: did not found $mod file ($modfilepath) ; are you sure shinken-$mod is installed?"
+        log_failure_msg "FAILED: did not find $mod file ($modfilepath) ; are you sure shinken-$mod is installed?"
         return 5
     }
     [ "$DEBUG" = 1 ] && DEBUGCMD="--debug "$(getdebugfile "$mod")
-    # Skonf need skonf.cfg, arbiter nagios.cfg, and the other OTHERd.ini
-    if [ "$mod" = 'skonf' ]; then
-	output=$("$modfilepath" -d -c "$SKONFCFG" $DEBUGCMD 2>&1)
-        rc=$?
-    elif [ "$mod" != "arbiter" ]; then
-        output=$("$modfilepath" -d -c "$ETC/${mod}d.ini" $DEBUGCMD 2>&1)
+    # Arbiter shinken.cfg, and the other OTHERd.ini
+    if [ "$mod" != "arbiter" ]; then
+        modINI=$(echo "$"${mod}CFG | tr '[:lower:]' '[:upper:]')
+        modinifile=$(eval echo ${modINI})
+        output=$($PYTHON "$modfilepath" -d -c "${modinifile}" $DEBUGCMD 2>&1)
         rc=$?
     else
-        output=$("$modfilepath" -d -c "$SHINKENCFG" -c "$SHINKENSPECIFICCFG" $DEBUGCMD 2>&1)
+        if ! test "$SHINKENSPECIFICCFG"
+        then
+            output=$($PYTHON "$modfilepath" -d -c "$SHINKENCFG" $DEBUGCMD 2>&1)
+        else
+            output=$($PYTHON "$modfilepath" -d -c "$SHINKENCFG" -c "$SHINKENSPECIFICCFG" $DEBUGCMD 2>&1)
+        fi
         rc=$?
     fi
     # debug:
@@ -323,7 +329,7 @@ do_stop() {
     }
     if [ ! -z "$pid" ]; then
         kill "$pid"
-        sleep 0.5
+        sleep 1
         ## TODO: instead of 'sleep 1': wait up to when pid file is removed (with timeout)?
         for i in 1 2 3
         do
@@ -376,7 +382,12 @@ do_stop() {
 #
 do_check() {
     [ "$DEBUG" = 1 ] && DEBUGCMD="--debug $VAR/${mod}-debug.log"
-    "$BIN/shinken-arbiter" -v -c "$ETC/nagios.cfg" -c "$ETC/shinken-specific.cfg" $DEBUGCMD 2>&1
+    if ! test "$SHINKENSPECIFICCFG"
+    then
+       $PYTHON "$BIN/shinken-arbiter" -v -c "$SHINKENCFG" $DEBUGCMD 2>&1
+    else
+       $PYTHON "$BIN/shinken-arbiter" -v -c "$SHINKENCFG" -c "$SHINKENSPECIFICCFG" $DEBUGCMD 2>&1
+    fi
     return $?
 }
 
@@ -456,6 +467,10 @@ do_restart_() {
     return $rc
 }
 
+do_force_reload_() {
+    do_restart_ $1
+}
+
 do_reload_() {
     mod="$1"
     echo "Reloading $mod"
@@ -495,13 +510,14 @@ do_check_() {
     echo "Doing config check"
     output=$(do_check "$1" 2>&1)
     rc=$?
+    check_res_file=$(mktemp /tmp/shinken_checkconfig_resultXXXXXXXX)
+    echo "$output" > "$check_res_file"
+    mv $check_res_file /tmp/shinken_checkconfig_result
+    check_res_file="/tmp/shinken_checkconfig_result"
+
     if [ $rc -eq 0 ]; then
         echo_success
     else
-        check_res_file=$(mktemp /tmp/shinken_checkconfig_resultXXXXXXXX)
-        echo "$output" > "$check_res_file"
-        mv $check_res_file /tmp/shinken_checkconfig_result
-        check_res_file="/tmp/shinken_checkconfig_result"
         output=$(echo "$output" | tail -1)
         log_warning_msg "full result is in ${check_res_file}"
         log_failure_msg "ConfigCheck failed: $output"
@@ -517,10 +533,17 @@ do_checkconfig_() { do_check_ "$1" ; }
 do_cmd_on() {
     action=$1
     mods=$2
+
+    local return_value
+    return_value=0
+
     for mod in $mods
     do
-        do_${action}_ "$mod"
+        # If at least one action fails, the return value is 1.
+        do_${action}_ "$mod" || return_value=1
     done
+
+    return $return_value
 }
 
 
@@ -528,8 +551,11 @@ do_cmd_on() {
 ## Main:
 
 case "$CMD" in
-    start|stop|restart|status)
+    start|stop|restart|status|force-reload)
         do_cmd_on "$CMD" "$SUBMODULES"
+        ;;
+    force-reload)
+        do_cmd_on "force_reload" "$SUBMODULES"
         ;;
     check|checkconfig|reload)
         do_cmd_on "$CMD" "arbiter"

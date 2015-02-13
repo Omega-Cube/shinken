@@ -2,7 +2,7 @@
 
 # -*- mode: python ; coding: utf-8 -*-
 
-# Copyright (C) 2009-2012:
+# Copyright (C) 2009-2014:
 #     Gabes Jean, naparuba@gmail.com
 #     Gerhard Lausser, Gerhard.Lausser@consol.de
 #     Gregory Starck, g.starck@gmail.com
@@ -25,8 +25,8 @@
 
 import re
 
-from shinken.util import to_float, to_split, to_char, to_int
-from shinken.log  import logger
+from shinken.util import to_float, to_split, to_char, to_int, unique_value, list_split
+import logging
 
 __all__ = ['UnusedProp', 'BoolProp', 'IntegerProp', 'FloatProp',
            'CharProp', 'StringProp', 'ListProp',
@@ -58,7 +58,7 @@ class Property(object):
                  fill_brok=None, conf_send_preparation=None,
                  brok_transformation=None, retention=False,
                  retention_preparation=None, to_send=False,
-                 override=False, managed=True):
+                 override=False, managed=True, split_on_coma=True, merging='uniq'):
 
         """
         `default`: default value to be used if this property is not set.
@@ -78,6 +78,9 @@ class Property(object):
         `retention`: if set, we will save this property in the retention files
         `retention_preparation`: function, if set, will go this function before
                      being save to the retention data
+        `split_on_coma`: indicates that list property value should not be
+                     splitted on coma delimiter (values conain comas that
+                     we want to keep).
 
         Only for the initial call:
 
@@ -95,6 +98,9 @@ class Property(object):
                      value of the configuration we send it
 
         managed: property that is managed in Nagios but not in Shinken
+
+        merging: for merging properties, should we take only one or we can
+                     link with ,
 
         """
 
@@ -114,6 +120,11 @@ class Property(object):
         self.override = override
         self.managed = managed
         self.unused = False
+        self.merging = merging
+        self.split_on_coma = split_on_coma
+
+    def pythonize(self, val):
+        return val
 
 
 class UnusedProp(Property):
@@ -151,40 +162,46 @@ class BoolProp(Property):
     false, no, off for False, and 1, true, yes, on for True).
     """
 
-    #@staticmethod
-    def pythonize(self, val):
-        return _boolean_states[val.lower()]
+    @staticmethod
+    def pythonize(val):
+        if isinstance(val, bool):
+            return val
+        val = unique_value(val).lower()
+        if val in _boolean_states.keys():
+            return _boolean_states[val]
+        else:
+            raise PythonizeError("Cannot convert '%s' to a boolean value" % val)
 
 
 class IntegerProp(Property):
     """Please Add a Docstring to describe the class here"""
 
-    #@staticmethod
     def pythonize(self, val):
+        val = unique_value(val)
         return to_int(val)
 
 
 class FloatProp(Property):
     """Please Add a Docstring to describe the class here"""
 
-    #@staticmethod
     def pythonize(self, val):
+        val = unique_value(val)
         return to_float(val)
 
 
 class CharProp(Property):
     """Please Add a Docstring to describe the class here"""
 
-    #@staticmethod
     def pythonize(self, val):
+        val = unique_value(val)
         return to_char(val)
 
 
 class StringProp(Property):
     """Please Add a Docstring to describe the class here"""
 
-    #@staticmethod
     def pythonize(self, val):
+        val = unique_value(val)
         return val
 
 
@@ -199,16 +216,19 @@ class ConfigPathProp(StringProp):
 class ListProp(Property):
     """Please Add a Docstring to describe the class here"""
 
-    #@staticmethod
     def pythonize(self, val):
-        return to_split(val)
+        if isinstance(val, list):
+            return [s.strip() for s in list_split(val, self.split_on_coma)]
+        else:
+            return [s.strip() for s in to_split(val, self.split_on_coma)]
 
 
 class LogLevelProp(StringProp):
     """ A string property representing a logging level """
 
     def pythonize(self, val):
-        return logger.get_level_id(val)
+        val = unique_value(val)
+        return logging.getLevelName(val)
 
 
 class DictProp(Property):
@@ -221,13 +241,14 @@ class DictProp(Property):
         """
         super(DictProp, self).__init__(*args, **kwargs)
 
-        if not elts_prop is None and not issubclass(elts_prop, Property):
-            raise TypeError("DictProp constructor only accept Property sub-classes as elts_prop parameter")
-        self.elts_prop = elts_prop()
+        if elts_prop is not None and not issubclass(elts_prop, Property):
+            raise TypeError("DictProp constructor only accept Property"
+                            "sub-classes as elts_prop parameter")
+        if elts_prop is not None:
+            self.elts_prop = elts_prop()
 
     def pythonize(self, val):
-
-        #import traceback; traceback.print_stack()
+        val = unique_value(val)
         def split(kv):
             m = re.match("^\s*([^\s]+)\s*=\s*([^\s]+)\s*$", kv)
             if m is None:
@@ -235,12 +256,16 @@ class DictProp(Property):
 
             return (
                 m.group(1),
-                # >2.4 only. we keep it for later. m.group(2) if self.elts_prop is None else self.elts_prop.pythonize(m.group(2))
+                # >2.4 only. we keep it for later. m.group(2) if self.elts_prop is None
+                # else self.elts_prop.pythonize(m.group(2))
                 (self.elts_prop.pythonize(m.group(2)), m.group(2))[self.elts_prop is None]
             )
 
         if val is None:
             return(dict())
+
+        if self.elts_prop is None:
+            return val
 
         # val is in the form "key1=addr:[port],key2=addr:[port],..."
         print ">>>", dict([split(kv) for kv in to_split(val)])
@@ -255,6 +280,7 @@ class AddrProp(Property):
             i.e: val = "192.168.10.24:445"
             NOTE: port is optional
         """
+        val = unique_value(val)
         m = re.match("^([^:]*)(?::(\d+))?$", val)
         if m is None:
             raise ValueError
@@ -264,3 +290,30 @@ class AddrProp(Property):
             addr['port'] = int(m.group(2))
 
         return addr
+
+
+class ToGuessProp(Property):
+    """Unknown property encountered while parsing"""
+
+    @staticmethod
+    def pythonize(val):
+        if isinstance(val, list) and len(set(val)) == 1:
+            # If we have a list with a unique value just use it
+            return val[0]
+        else:
+            # Well, can't choose to remove somthing.
+            return val
+
+
+class IntListProp(ListProp):
+    """Integer List property"""
+    def pythonize(self, val):
+        val = super(IntListProp, self).pythonize(val)
+        try:
+            return [int(e) for e in val]
+        except ValueError as value_except:
+            raise PythonizeError(str(value_except))
+
+
+class PythonizeError(Exception):
+    pass

@@ -1,8 +1,7 @@
 #!/usr/bin/env python
-
 # -*- coding: utf-8 -*-
 
-# Copyright (C) 2009-2012:
+# Copyright (C) 2009-2014:
 #     Gabes Jean, naparuba@gmail.com
 #     Gerhard Lausser, Gerhard.Lausser@consol.de
 #     Gregory Starck, g.starck@gmail.com
@@ -38,6 +37,7 @@ else:
     from Queue import Queue
     from threading import Thread as Process
 
+import os
 import time
 import sys
 import signal
@@ -45,8 +45,8 @@ import traceback
 import cStringIO
 
 
-from log import logger
-
+from shinken.log import logger
+from shinken.misc.common import setproctitle
 
 class Worker:
     """This class is used for poller and reactionner to work.
@@ -64,7 +64,9 @@ class Worker:
     _timeout = None
     _c = None
 
-    def __init__(self, id, s, returns_queue, processes_by_worker, mortal=True, timeout=300, max_plugins_output_length=8192, target=None, loaded_into='unknown'):
+    def __init__(self, id, s, returns_queue, processes_by_worker, mortal=True, timeout=300,
+                 max_plugins_output_length=8192, target=None, loaded_into='unknown',
+                 http_daemon=None):
         self.id = self.__class__.id
         self.__class__.id += 1
 
@@ -83,13 +85,18 @@ class Worker:
         self.i_am_dying = False
         # Keep a trace where the worker is launch from (poller or reactionner?)
         self.loaded_into = loaded_into
-        
+        if os.name != 'nt':
+            self.http_daemon = http_daemon
+        else:  # windows forker do not like pickle http/lock
+            self.http_daemon = None
 
     def is_mortal(self):
         return self._mortal
 
+
     def start(self):
         self._process.start()
+
 
     # Kill the background process
     # AND close correctly the queues (input and output)
@@ -136,11 +143,11 @@ class Worker:
     def get_new_checks(self):
         try:
             while(len(self.checks) < self.processes_by_worker):
-                #print "I", self.id, "wait for a message"
+                # print "I", self.id, "wait for a message"
                 msg = self.s.get(block=False)
                 if msg is not None:
                     self.checks.append(msg.get_data())
-                #print "I", self.id, "I've got a message!"
+                # print "I", self.id, "I've got a message!"
         except Empty, exp:
             if len(self.checks) == 0:
                 self._idletime = self._idletime + 1
@@ -149,6 +156,7 @@ class Worker:
         # get back to work :)
         except IOError, exp:
             return
+
 
     # Launch checks that are in status
     # REF: doc/shinken-action-queues.png (4)
@@ -162,7 +170,9 @@ class Worker:
                 # action launching
                 if r == 'toomanyopenfiles':
                     # We should die as soon as we return all checks
+                    logger.error("[%d] I am dying Too many open files %s ... ", self.id, chk)
                     self.i_am_dying = True
+
 
     # Check the status of checks
     # if done, return message finished :)
@@ -179,11 +189,11 @@ class Worker:
             if action.status in ('done', 'timeout'):
                 to_del.append(action)
                 # We answer to the master
-                #msg = Message(id=self.id, type='Result', data=action)
+                # msg = Message(id=self.id, type='Result', data=action)
                 try:
                     self.returns_queue.put(action)
                 except IOError, exp:
-                    logger.error("[%d] Exiting: %s" % (self.id, exp))
+                    logger.error("[%d] Exiting: %s", self.id, exp)
                     sys.exit(2)
 
         # Little sleep
@@ -219,7 +229,8 @@ class Worker:
         except Exception, exp:
             output = cStringIO.StringIO()
             traceback.print_exc(file=output)
-            logger.error("Worker '%d' exit with an unmanaged exception : %s" % (self.id, output.getvalue()))
+            logger.error("Worker '%d' exit with an unmanaged exception : %s",
+                         self.id, output.getvalue())
             output.close()
             # Ok I die now
             raise
@@ -231,12 +242,16 @@ class Worker:
     # return_queue = queue managed by manager
     # c = Control Queue for the worker
     def do_work(self, s, returns_queue, c):
-        ## restore default signal handler for the workers:
+        # restore default signal handler for the workers:
         # but on android, we are a thread, so don't do it
         if not is_android:
             signal.signal(signal.SIGTERM, signal.SIG_DFL)
 
         self.set_proctitle()
+
+        print "I STOP THE http_daemon", self.http_daemon
+        if self.http_daemon:
+            self.http_daemon.shutdown()
 
         timeout = 1.0
         self.checks = []
@@ -262,21 +277,17 @@ class Worker:
             try:
                 cmsg = c.get(block=False)
                 if cmsg.get_type() == 'Die':
-                    logger.debug("[%d] Dad say we are dying..." % self.id)
+                    logger.debug("[%d] Dad say we are dying...", self.id)
                     break
-            except:
+            except Exception:
                 pass
-
-            if self._mortal == True and self._idletime > 2 * self._timeout:
-                logger.warning("[%d] Timeout, Harakiri" % self.id)
-                # The master must be dead and we are lonely, we must die
-                break
 
             # Look if we are dying, and if we finish all current checks
             # if so, we really die, our master poller will launch a new
             # worker because we were too weak to manage our job :(
             if len(self.checks) == 0 and self.i_am_dying:
-                logger.warning("[%d] I DIE because I cannot do my job as I should (too many open files?)... forgot me please." % self.id)
+                logger.warning("[%d] I DIE because I cannot do my job as I should"
+                               "(too many open files?)... forgot me please.", self.id)
                 break
 
             # Manage a possible time change (our avant will be change with the diff)
@@ -288,9 +299,4 @@ class Worker:
                 timeout = 1.0
 
     def set_proctitle(self):
-        try:
-            from setproctitle import setproctitle
-            setproctitle("shinken-%s worker" % self.loaded_into)
-        except:
-            pass
-
+        setproctitle("shinken-%s worker" % self.loaded_into)

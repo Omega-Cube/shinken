@@ -2,7 +2,7 @@
 
 # -*- coding: utf-8 -*-
 
-# Copyright (C) 2009-2012:
+# Copyright (C) 2009-2014:
 #    Gabes Jean, naparuba@gmail.com
 #    Gerhard Lausser, Gerhard.Lausser@consol.de
 #    Gregory Starck, g.starck@gmail.com
@@ -31,16 +31,12 @@ Shinken.
 
 import sys
 
-VERSION = "1.4"
+VERSION = "2.2"
 
 
-# Make sure people are using Python 2.4 or higher
-if sys.version_info < (2, 4):
-    sys.exit("Shinken requires as a minimum Python 2.4.x, sorry")
+# Make sure people are using Python 2.6 or higher
+# This is the canonical python version check
+if sys.version_info < (2, 6):
+    sys.exit("Shinken requires as a minimum Python 2.6.x, sorry")
 elif sys.version_info >= (3,):
     sys.exit("Shinken is not yet compatible with Python 3.x, sorry")
-
-try:
-    import shinken.pyro_wrapper
-except ImportError:
-    sys.exit("Shinken requires the Python Pyro module. Please install it.")

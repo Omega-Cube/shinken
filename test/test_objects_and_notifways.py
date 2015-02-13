@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (C) 2009-2010:
+# Copyright (C) 2009-2014:
 #    Gabes Jean, naparuba@gmail.com
 #    Gerhard Lausser, Gerhard.Lausser@consol.de
 #
@@ -27,24 +27,24 @@ from shinken_test import *
 
 class TestObjectsAndNotifWays(ShinkenTest):
     def setUp(self):
-        self.setup_with_file('etc/nagios_objects_and_notifways.cfg')
+        self.setup_with_file('etc/shinken_objects_and_notifways.cfg')
 
     # We got strange "objects" for some contacts property when we are using notif ways
     # and asking for  broks. Search why
     def test_dummy(self):
         c_normal = self.sched.contacts.find_by_name("test_contact")
-        self.assert_(c_normal is not None)
+        self.assertIsNot(c_normal, None)
         c_nw = self.sched.contacts.find_by_name("test_contact_nw")
-        self.assert_(c_nw is not None)
+        self.assertIsNot(c_nw, None)
 
         b = c_normal.get_initial_status_brok()
         b.prepare()
         print "B normal", b
-        self.assert_(b.data['host_notification_options'] == u'd,u,r,f,s')
+        self.assertEqual([u'd', u'u', u'r', u'f', u's'], b.data['host_notification_options'])
         b2 = c_nw.get_initial_status_brok()
         b2.prepare()
         print "B nw", b2
-        self.assert_(b2.data['host_notification_options'] == u'')
+        self.assertEqual([u''], b2.data['host_notification_options'])
 
 
 if __name__ == '__main__':

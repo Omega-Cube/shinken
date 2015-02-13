@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# Copyright (C) 2009-2012:
+# Copyright (C) 2009-2014:
 #    Gabes Jean, naparuba@gmail.com
 #    Gerhard Lausser, Gerhard.Lausser@consol.de
 #    Gregory Starck, g.starck@gmail.com
@@ -27,4 +27,4 @@ BIN="$DIR"/../bin
 ETC="$DIR"/../etc
 
 echo "Launching Receiver (which manages passive data)"
-"$BIN"/shinken-receiver -d -c "$ETC"/receiverd.ini
+"$BIN"/shinken-receiver -d -c "$ETC"/daemons/receiverd.ini

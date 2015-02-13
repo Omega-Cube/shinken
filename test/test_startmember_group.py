@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (C) 2009-2010:
+# Copyright (C) 2009-2014:
 #    Gabes Jean, naparuba@gmail.com
 #    Gerhard Lausser, Gerhard.Lausser@consol.de
 #
@@ -27,19 +27,20 @@ from shinken_test import *
 
 class TestStarMemberGroup(ShinkenTest):
     def setUp(self):
-        self.setup_with_file('etc/nagios_startmember_group.cfg')
+        self.setup_with_file('etc/shinken_startmember_group.cfg')
 
     # Check if service apply on a hostgroup * is good or not
     def test_starmembergroupdef(self):
         hg = self.sched.conf.hostgroups.find_by_name('ping-servers')
-        self.assert_(hg is not None)
+        self.assertIsNot(hg, None)
         print hg.members
         h = self.sched.conf.hosts.find_by_name('test_host_0')
         r = self.sched.conf.hosts.find_by_name('test_router_0')
-        self.assert_(h in hg.members and r in hg.members)
+        self.assertIn(h, hg.members)
+        self.assertIn(r, hg.members)
 
         s = self.sched.conf.services.find_srv_by_name_and_hostname('test_host_0', 'PING')
-        self.assert_(s is not None)
+        self.assertIsNot(s, None)
 
 
 if __name__ == '__main__':

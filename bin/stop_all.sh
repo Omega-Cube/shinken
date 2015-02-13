@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# Copyright (C) 2009-2012:
+# Copyright (C) 2009-2014:
 #    Gabes Jean, naparuba@gmail.com
 #    Gerhard Lausser, Gerhard.Lausser@consol.de
 #    Gregory Starck, g.starck@gmail.com
@@ -31,4 +31,3 @@ DIR="$(cd $(dirname "$0"); pwd)"
 "$DIR"/stop_receiver.sh
 "$DIR"/stop_scheduler.sh
 "$DIR"/stop_arbiter.sh
-"$DIR"/stop_skonf.sh
